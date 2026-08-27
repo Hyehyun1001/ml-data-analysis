@@ -217,7 +217,7 @@ def model_train_predict(model, X_features, y_labels):
 `train_test_split`을 항상 `random_state=156`으로 고정하기 때문에, 아래에서 비교하는 모든 모델이 **동일한 행 구성의
 테스트셋**을 공유합니다 (다른 feature 조합이라도 행 수만 같으면 분할 인덱스가 동일) → RMSLE를 서로 공정하게 비교 가능.
 
-### 5-B. 가중치 기반 `combine_features` (Ridge 전용 실험)
+### 5-B. 가중치 기반 `combine_features` (Ridge 전용 실험) — ⚠️ 보류, 노트북에서 주석 처리됨
 
 `category_name` > `shipping` > `null_penalty` > 나머지(`name`/`item_description`/`brand_name`/`item_condition_id`) 순으로
 우선순위를 두고, 해당 블록에 배수를 곱해 결합:
@@ -251,7 +251,7 @@ Ridge(원본)과 Ridge(가중치) 예측을 단순 평균한 **블렌드**도 �
 blend_preds = (linear_preds + weighted_preds) / 2
 ```
 
-### 5-C. 단계적(잔차) LightGBM 파이프라인 — "B안"
+### 5-C. 단계적(잔차) LightGBM 파이프라인 — "B안" — ⚠️ 보류, 노트북에서 주석 처리됨
 
 우선순위 피처로 먼저 설명하고, 남은 피처로 잔차(residual)를 보정하는 2단계 구조:
 
@@ -297,6 +297,67 @@ lgbm_model = LGBMRegressor(n_estimators=200, learning_rate=0.05, num_leaves=125,
 lgbm_preds, lgbm_y_test = model_train_predict(lgbm_model, X_features, y_labels)
 ```
 
+### 5-E. LGBM 네이티브 categorical + n-gram — 신규 채택, LightGBM 성능을 실제로 끌어올린 방법
+
+5-B/5-C(가중치, 단계적 잔차)가 모두 원본 Ridge보다 못했던 원인을, "우선순위를 사람이 정하는 방식" 자체가
+아니라 **LGBM에 넣는 피처 표현 방식**에서 찾아본 시도. hstack 구조는 유지하되, 그 안에 들어가는 두 블록의
+인코딩 방식만 LGBM에 유리하게 교체함.
+
+**① n-gram 확장** — `name`은 `CountVectorizer(ngram_range=(1,2))`로 바로 적용 가능하지만, `item_description`은
+이미 토큰 리스트로 정제되어 있어 `ngram_range` 파라미터가 먹히지 않음(커스텀 `analyzer`를 쓰면 sklearn이 자체
+n-gram 로직을 건너뜀). 그래서 토큰 리스트에서 n-gram을 직접 생성하는 analyzer를 정의:
+
+```python
+name_vec_v2 = CountVectorizer(ngram_range=(1, 2), min_df=2, max_features=20000)
+X_name_v2 = name_vec_v2.fit_transform(mercari_df['name'])
+
+def ngram_analyzer(tokens, n_range=(1, 2)):
+    grams = []
+    for n in range(n_range[0], n_range[1] + 1):
+        grams += [' '.join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+    return grams
+
+desc_vec_v2 = TfidfVectorizer(min_df=2, max_features=30000, analyzer=lambda x: ngram_analyzer(x, (1, 2)))
+X_descp_v2 = desc_vec_v2.fit_transform(mercari_df['item_description'])
+# X_name_v2 : (1481603, 20000)
+# X_descp_v2: (1481603, 30000)
+```
+
+**② LGBM 네이티브 categorical** — `brand_name`/`cat_dae`/`cat_jung`/`cat_so`를 `OneHotEncoder`(총 5,804차원)로
+쪼개는 대신 `LabelEncoder`로 정수 라벨화하고, LGBM의 `categorical_feature` 파라미터로 "이 컬럼들은 범주형"이라고
+직접 알려줌 → 트리가 원-핫보다 훨씬 적은 컬럼으로 카테고리 분기를 처리:
+
+```python
+from sklearn.preprocessing import LabelEncoder
+
+cat_label_df = pd.DataFrame(index=mercari_df.index)
+for col in CAT_COLS:
+    le = LabelEncoder()
+    cat_label_df[col] = le.fit_transform(mercari_df[col])
+
+X_cat_label = csr_matrix(cat_label_df.values.astype(float))
+# X_cat_label: (1481603, 4)  <- 원-핫 5,804차원이 컬럼 4개로 압축됨
+```
+
+**③ 재결합 + 학습** — hstack에 새 블록만 교체해 넣고, 결합된 matrix에서 범주형 컬럼의 위치(인덱스)를 계산해
+`categorical_feature`로 전달:
+
+```python
+X_features_v2 = hstack([X_name_v2, X_descp_v2, X_cat_label, X_num]).tocsr()
+# X_features_v2: (1481603, 50007)  <- 원본(55807)보다 오히려 축소됨
+
+n_text = X_name_v2.shape[1] + X_descp_v2.shape[1]
+cat_feature_idx = list(range(n_text, n_text + len(CAT_COLS)))
+# [50000, 50001, 50002, 50003] -> ['brand_name', 'cat_dae', 'cat_jung', 'cat_so']
+
+X_train_v2, X_test_v2, y_train_v2, y_test_v2 = train_test_split(
+    X_features_v2, y_labels, test_size=0.2, random_state=156
+)
+lgbm_v2 = LGBMRegressor(n_estimators=200, learning_rate=0.05, num_leaves=125, random_state=156)
+lgbm_v2.fit(X_train_v2, y_train_v2, categorical_feature=cat_feature_idx)
+v2_preds = lgbm_v2.predict(X_test_v2)
+```
+
 ---
 
 ## 6. 최종 결과 비교
@@ -304,21 +365,28 @@ lgbm_preds, lgbm_y_test = model_train_predict(lgbm_model, X_features, y_labels)
 | 모델 | 구성 | RMSLE | 비고 |
 |---|---|---|---|
 | 🥇 **Ridge(원본)** | `X_features` 그대로, `alpha=3` | **0.47067** | **최고 성능** |
-| 2 | Ridge Blend | (Ridge 원본 + Ridge 가중치) 예측 평균 | 0.47084 |
-| 3 | Ridge(가중치) | `combine_features()` 가중치 적용 | 0.47154 |
-| 4 | LightGBM(단일) | `X_features`, `n_estimators=200` | 0.49220 |
-| 5 | B안 단계적 LGBM | 우선순위→잔차 2단계 LGBM | 0.49735 |
+| 🥈 **LGBM(네이티브 categorical + n-gram)** | `X_features_v2`, 5-E 참고 | **0.47363** | Ridge와 격차 0.00296까지 좁힘 |
+| 3 | Ridge Blend `(보류)` | (Ridge 원본 + Ridge 가중치) 예측 평균 | 0.47084 |
+| 4 | Ridge(가중치) `(보류)` | `combine_features()` 가중치 적용 | 0.47154 |
+| 5 | LightGBM(단일, 원-핫+유니그램) | `X_features`, `n_estimators=200` | 0.49220 |
+| 6 | B안 단계적 LGBM `(보류)` | 우선순위→잔차 2단계 LGBM | 0.49735 |
+
+`(보류)` 표시된 3개는 노트북에서 코드가 주석 처리되어 더 이상 실행되지 않음 (12~14번 섹션). 현재 실제로
+실행되는 모델은 Ridge(원본, 11번), LightGBM 단일(11번), LGBM 네이티브+n-gram(15~16번) 3개.
 
 ### 인사이트
 
-- **가장 단순한 원본 Ridge가 5개 중 최고 성능.** 가중치·블렌딩·단계적 LGBM 등 사람이 개입한 "우선순위" 가정이
-  모두 오히려 성능을 깎아먹었음.
-- Ridge는 정규화된 최소제곱법으로 **데이터에 최적인 계수 배분을 스스로 찾아냄**. 여기에 `category가 더
-  중요할 것`이라는 수동 가중치(3배)를 강제로 얹으면, 데이터가 실제로 원했던 최적 균형에서 벗어나 성능이 소폭
-  하락함 (0.47067 → 0.47154).
-- LightGBM 계열(단일/2단계 모두)이 Ridge보다 낮은 성능을 보인 것은, 이 데이터의 피처가 5만+ 차원의 고차원
-  sparse 텍스트 벡터 위주라 **선형모델이 트리 기반 모델보다 이런 구조를 더 잘 살린다**는 공통된 원인으로 보임.
-  B안에서 문제를 두 단계로 나눠도 결국 두 단계 모두 LightGBM이라 이 한계를 벗어나지 못함.
+- **원본 Ridge가 여전히 최고 성능**이지만, **LGBM은 피처 표현 방식만 바꿔서 큰 폭으로 따라잡음**
+  (RMSLE 0.49220 → 0.47363, 약 3.8% 개선). "사람이 정한 우선순위 가중치"보다 "모델 구조에 맞는 피처 인코딩"이
+  실제로 유효했다는 것을 보여주는 결과.
+- 5-B(가중치)/5-C(단계적 잔차)가 실패했던 이유: Ridge는 정규화된 최소제곱법으로 **데이터에 최적인 계수
+  배분을 스스로 찾아내는데**, 여기에 사람이 정한 우선순위(3배 가중치, 2단계 분리)를 강제로 얹으면 데이터가
+  실제로 원했던 최적 균형에서 벗어남.
+- 5-E(네이티브 categorical + n-gram)가 성공했던 이유는 반대로, **모델(LGBM)의 구조적 특성에 맞춰 피처의
+  "표현 방식"만 바꾼 것** — 우선순위를 강제하지 않고, 트리 모델이 원-핫보다 라벨 인코딩+categorical_feature를
+  더 효율적으로 분기하는 특성, 그리고 n-gram으로 늘어난 표현력을 그대로 살렸음.
+- 그럼에도 Ridge가 여전히 근소하게 앞서는 것은, 이 데이터의 핵심 신호가 5만+ 차원의 고차원 sparse 텍스트
+  벡터에 있고 **선형모델이 이런 초고차원 sparse 구조를 트리 기반보다 잘 살리는 경향**이 있기 때문으로 보임.
 
 ---
 
@@ -333,19 +401,23 @@ lgbm_preds, lgbm_y_test = model_train_predict(lgbm_model, X_features, y_labels)
 - 섹션 3~8-1: 전처리 (2장)
 - 섹션 9~10-1: 벡터화/인코딩, hstack, 학습 전 데이터 시각화 (3~4장)
 - 섹션 11: Ridge vs LightGBM 기본 비교, `model_train_predict`/`rmsle` 정의 (5-A, 5-D)
-- 섹션 12: 가중치 `combine_features` + Ridge 블렌드 (5-B)
-- 섹션 13~14: B안 단계적 LGBM + 전체 지표 비교 (5-C, 6장)
+- 섹션 12: `(보류, 코드 주석 처리)` 가중치 `combine_features` + Ridge 블렌드 (5-B)
+- 섹션 13~14: `(보류, 코드 주석 처리)` B안 단계적 LGBM + 지표 비교 (5-C)
+- 섹션 15~16: LGBM 네이티브 categorical + n-gram + 최종 지표 비교 (5-E, 6장)
 
 **주의사항**
 - `mercari_df['price']`는 섹션 7(로그 변환) 이후 로그 스케일로 덮어써지므로, `X_features`에 절대 포함하지 않도록 주의.
 - 전체 데이터(148만 행) 처리라 `item_description` 토큰화, LightGBM 학습 셀은 실행 시간이 오래 걸릴 수 있음 (LightGBM 1회 학습 기준 수 분 단위).
-- `random_state=156`을 모든 분할/모델에서 고정해야 5장의 비교표와 동일한 수치가 재현됨.
+- `random_state=156`을 모든 분할/모델에서 고정해야 6장의 비교표와 동일한 수치가 재현됨.
+- 12~14번 섹션은 코드가 주석 처리되어 있어 그대로 실행해도 아무 일도 일어나지 않음(의도된 상태). 다시 활성화하려면
+  `#` 주석을 해제하면 되고, 이때 `linear_preds`/`weighted_preds` 등 참조 변수가 앞 셀에서 먼저 정의되어 있어야 함.
 
 ---
 
 ## 8. 향후 개선 아이디어 (미적용)
 
 - `TruncatedSVD`로 hstack 이후 차원 축소 시도 (현재는 `max_features` 캡만 적용)
-- Ridge `alpha` 그리드/베이지안 탐색으로 정규화 강도 튜닝
+- Ridge `alpha` 그리드/베이지안 탐색으로 정규화 강도 튜닝 (현재 `alpha=3` 고정, 튜닝 안 됨)
 - `max_features`(어휘 크기) 확대/축소에 따른 RMSLE 민감도 실험
+- LGBM(5-E)에도 `early_stopping_rounds`/`num_leaves` 등 하이퍼파라미터 튜닝 적용
 - 수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 5-B 재시도
