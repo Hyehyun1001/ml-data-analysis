@@ -466,6 +466,10 @@ for a in alphas:
 
 ## 6. 최종 결과 비교
 
+> ⚠️ **이 표는 15~17번 섹션(노트북) 시점 기준입니다.** 이후 9장에서 vocab 크기 검증, 새 피처,
+> FM_FTRL 모델 축 추가, leakage 없는 블렌딩까지 진행해 **최종 RMSLE 0.42015**까지 갱신했습니다.
+> 최신 결과는 [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고.
+
 | 순위 | 모델 | 구성 | RMSLE | 전략 |
 |---|---|---|---|---|
 | 🥇 | **Ridge(원본, alpha=3)** | `X_features` 그대로 | **0.47067** | 5-2 baseline = 5-3 튜닝 결과 (이미 최적) |
@@ -528,10 +532,151 @@ for a in alphas:
 
 ---
 
-## 8. 향후 개선 아이디어 (미적용)
+## 8. 향후 개선 아이디어
 
-- `TruncatedSVD`로 hstack 이후 차원 축소 시도 (현재는 `max_features` 캡만 적용)
-- `max_features`(어휘 크기) 확대/축소에 따른 RMSLE 민감도 실험
-- LGBM(5-1-d)에도 `early_stopping_rounds`/`num_leaves`/`learning_rate` 등 하이퍼파라미터 튜닝 적용 (alpha 튜닝처럼 그리드서치)
-- Ridge `alpha`를 더 촘촘한 그리드(예: 1~5 사이 0.5 간격)로 재탐색해 소수점 단위 추가 개선 여지 확인
-- 수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 5-1-b 재시도
+- ~~`max_features`(어휘 크기) 확대/축소에 따른 RMSLE 민감도 실험~~ → **완료, [9-1](#9-1-vocab-크기max_features-민감도-실험) 참고** (결론: 이미 충분히 큼, 캡을 더 키울 필요 없음)
+- ~~LGBM에도 `early_stopping_rounds`/`num_leaves`/`learning_rate` 등 하이퍼파라미터 튜닝 적용~~ → **완료, [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고** (0.47320 → 0.42742)
+- ~~수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 재시도~~ → **완료, [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고** (모델 예측값을 valid에서 가중치 그리드서치로 결합 — 완전한 학습형 메타러너는 아니지만 leakage 없는 결합 가중치 탐색은 달성)
+- `TruncatedSVD`로 hstack 이후 차원 축소 시도 (vocab 실험 결과 캡을 더 키우는 게 무의미한 것으로 확인됐으므로, 반대 방향인 차원 축소도 성능에 큰 영향은 없을 가능성이 높지만 미검증)
+- Ridge `alpha`를 더 촘촘한 그리드(예: 1~5 사이 0.5 간격)로 재탐색해 소수점 단위 추가 개선 여지 확인 ([9-5](#9-5-최종-leakage-free-파이프라인--블렌딩)에서 `{1,3,10}` 성긴 그리드로는 `alpha=3` 재확인만 함)
+- FM_FTRL을 노트북(`Mercari.ipynb`)에 정식 셀로 통합 (현재는 세션 스크립트로만 존재, [9-4](#9-4-fm_ftrl-직접-구현-numpyscipy) 참고)
+- FM_FTRL의 `k`(latent factor 차원)/정규화 하이퍼파라미터도 Ridge/LGBM처럼 그리드서치
+
+---
+
+## 9. vocab 크기 / 피처 표현 / FM_FTRL 모델 축 추가 (후속 세션)
+
+15~17번 섹션(노트북) 이후, 별도 세션에서 다음 순서로 심화 실험을 진행했습니다. 모든 실험은 노트북과
+동일한 `mercari_train.tsv` 전처리(섹션 1~8-1)를 재현한 캐시 위에서, **`random_state=156`으로 만든 동일한
+test set**을 기준으로 비교했습니다(전용 스크립트 실행, 노트북 셀로는 아직 미통합 — 위 TODO 참고).
+
+### 9-1. vocab 크기(`max_features`) 민감도 실험
+
+`name`/`item_description`에 `min_df=2`만 걸고 `max_features` 캡을 없앴을 때 실제 어휘 크기:
+
+| | unigram | ngram(1,2) |
+|---|---|---|
+| `name` | 47,199 | 401,894 |
+| `item_description` | 76,925 | 1,566,190 |
+
+기존 캡(`name` 20,000 / `desc` 30,000)은 unigram만으로도 이미 넘는 값이라 **확실히 binding**입니다.
+하지만 LGBM(native categorical + ngram) 기준으로 캡을 실제로 풀어봤을 때:
+
+| config | max_features | dims | RMSLE |
+|---|---|---|---|
+| D | 20k / 30k (노트북 15번과 동일) | 50,007 | 0.47320 |
+| E | 40k / 60k | 100,007 | 0.47288 |
+| F | uncapped (min_df=2만) | 1,968,091 | 0.47293 |
+
+**결론**: dims를 5만 → 약 200만(40배)까지 늘려도 RMSLE는 사실상 평평합니다(D→E→F 변화폭 0.0004,
+노이즈 수준). "vocab이 작다"는 직관은 사실이었지만(unigram 어휘가 이미 캡을 초과), **그 binding이
+성능에 미치는 실질 영향은 거의 없음** — 앞으로 `max_features`를 더 키울 필요는 없습니다.
+
+### 9-2. 개선의 원천 분리 — 카테고리 인코딩 vs n-gram 확장
+
+15번 섹션의 `0.49220 → 0.47363` 개선은 (a) OHE→LGBM native categorical 인코딩, (b) unigram→ngram(1,2)
+확장이 동시에 적용된 결과입니다. 둘을 분리해서 재측정(캡은 20k/30k 고정):
+
+| config | 카테고리 인코딩 | 텍스트 | dims | RMSLE |
+|---|---|---|---|---|
+| A (원본 baseline 재현) | OHE | unigram | 55,807 | 0.49180 |
+| B (카테고리만 교체) | **native** | unigram | 50,007 | **0.47409** |
+| C (텍스트만 교체) | OHE | **ngram** | 55,807 | 0.49093 |
+| D (노트북 15번 재현) | native | ngram | 50,007 | 0.47320 |
+
+**B(0.47409)가 D(0.47320)에 거의 근접** → 개선의 대부분(~97%)이 **카테고리 인코딩 교체**에서 왔고,
+ngram 확장의 순수 기여(C vs A: `0.49180→0.49093`, -0.00087)는 미미합니다. 캡을 그대로 둔 채 bigram만
+추가하면 빈도 기준 top-K 캡에서 unigram이 슬롯을 거의 다 차지해 bigram이 들어갈 자리가 부족하기
+때문으로 보입니다(9-1에서 실제 bigram 어휘가 40만+임을 확인).
+
+### 9-3. 새 피처 — 길이 피처 + target encoding
+
+브랜드/세부카테고리별 가격 통계, 텍스트 길이 등 파생 피처를 추가:
+
+| 피처 | 내용 | leakage 방지 |
+|---|---|---|
+| `name_len_words`, `name_len_chars` | 상품명 단어수/글자수 | 타깃 미사용, 문제 없음 |
+| `desc_len_tokens` | 설명 토큰 개수 | 동일 |
+| `has_brand` | 브랜드 존재 여부(이진) | 동일 |
+| `brand_te` | 브랜드별 평균 `log1p(price)` (target encoding) | **학습 데이터에서만** 통계 계산, count 기반 스무딩(`k=10`)으로 희귀 브랜드 과적합 방지, 미관측 값은 global mean으로 대체 |
+| `cat_so_te` | 소분류(`cat_so`)별 평균 `log1p(price)` | 동일 방식 |
+
+```python
+def target_encode(train_col, train_y, full_col, k=10):
+    global_mean = train_y.mean()
+    stats = pd.DataFrame({"col": train_col.values, "y": train_y}).groupby("col")["y"].agg(["mean", "count"])
+    smoothed = (stats["count"] * stats["mean"] + k * global_mean) / (stats["count"] + k)
+    return full_col.map(smoothed).fillna(global_mean).values
+```
+
+새 피처(20k/30k 캡, 기존 하이퍼파라미터 고정) 적용 효과:
+
+| 모델 | 새 피처 없음 | 새 피처 적용 | 개선폭 |
+|---|---|---|---|
+| Ridge | 0.46954 | 0.46853 | -0.00101 |
+| LGBM | 0.47320 | 0.47022 | -0.00298 |
+
+LGBM이 Ridge보다 약 3배 더 큰 이득을 봤습니다 — target encoding이 만드는 비선형 신호(가격대 threshold
+등)를 트리 모델이 더 잘 활용하는 것으로 해석됩니다.
+
+### 9-4. FM_FTRL 직접 구현 (numpy/scipy)
+
+**배경**: Kaggle 공개 커널 중 `Wordbatch`(FTRL + FM_FTRL + LightGBM 블렌드)가 이 대회에서 LB
+**0.42555**를 기록한 바 있습니다 ([참고](https://www.kaggle.com/anttip/wordbatch-ftrl-fm-lgb-lbl-0-42555)).
+참고로 이 대회 역대 1위(Sparse MLP 앙상블)는 RMSLE **0.3875**입니다
+([참고](https://github.com/pjankiewicz/mercari-solution)) — "0.3까지 내려간다"는 속설은 근거가 없었습니다.
+
+**환경 제약**: `wordbatch` 패키지(FM_FTRL 제공)는 Python 3.13용 사전빌드 wheel이 없고, 이 환경엔
+C 컴파일러(`cl.exe`/`gcc`)도 없어 설치 자체가 불가능했습니다. 대신 같은 알고리즘을 numpy/scipy만으로
+직접 구현:
+
+- **선형항 `w`**: McMahan et al., *"Ad Click Prediction: a View from the Trenches"* (2013)의
+  FTRL-proximal 업데이트를 그대로 사용 (좌표별 적응 학습률 + L1/L2).
+- **2차 상호작용항 `V`(FM, latent factor `k=8`)**: 표준 FM 2차항 트릭
+  `0.5 * sum_f[(sum_i v_if x_i)^2 - sum_i v_if^2 x_i^2]`을 미니배치 전체에 대해
+  **sparse @ dense 행렬곱으로 벡터화**(행 단위 Python 루프 없음)하고, AdaGrad로 학습.
+- 미니배치(5만 행)마다 `X_b.T @ (G*S) - (X_b^2)^T@G * V` 형태로 그래디언트를 계산 — nnz에 비례하는
+  비용이라 148만 행 규모에서도 epoch당 수 초 수준으로 충분히 빠름.
+- 합성 데이터(실제 FM 구조를 가진 랜덤 데이터)로 스모크 테스트 → train/test loss가 발산·NaN 없이
+  단조 감소함을 확인 후 실데이터에 적용.
+
+Wordbatch의 Cython/해싱 최적화 구현과 동일하지는 않지만(속도 최적화가 덜 됨), 수학적으로는 같은
+모델(선형 + FM 상호작용, FTRL류 좌표별 적응 학습률)입니다.
+
+### 9-5. 최종 leakage-free 파이프라인 + 블렌딩
+
+**모델별 피처 표현** (모델마다 자기에게 유리한 인코딩을 그대로 사용 — 블렌딩은 예측값 레벨에서만 결합):
+
+| 모델 | 텍스트 | 카테고리 | 새 피처 | dims |
+|---|---|---|---|---|
+| Ridge, FM_FTRL | unigram (20k/30k) | OneHotEncoder | 표준화(StandardScaler) | 55,813 |
+| LGBM | ngram(1,2) (20k/30k) | LabelEncoder + `categorical_feature` | raw | 50,013 |
+
+**2-stage 검증 절차** (test set은 마지막에 딱 한 번만 사용):
+
+1. **Stage 1 (튜닝)**: `train`(68%)으로만 학습 → `valid`(12%)로 Ridge `alpha` 그리드, LGBM
+   `early_stopping_rounds`, FM_FTRL epoch 수, 3모델 블렌드 가중치(0.05 단위 그리드)를 전부 결정.
+   `target_encode`/`StandardScaler`도 이 stage에서는 `train`에만 fit.
+2. **Stage 2 (최종 평가)**: Stage 1에서 정한 하이퍼파라미터/epoch 수 그대로 `train+valid`(80%) 전체로
+   재학습(`target_encode`/`StandardScaler`도 `train+valid`로 재fit) → `test`(20%)에 **딱 한 번** 예측 →
+   Stage 1에서 정한 블렌드 가중치를 그대로 적용(재탐색 없음).
+
+**LGBM 튜닝 결과**: `n_estimators` 상한 1200(early stopping) · `learning_rate=0.05` ·
+`num_leaves=180` · `min_child_samples=30` · `reg_alpha=reg_lambda=0.1` ·
+`feature_fraction=0.7` · `bagging_fraction=0.8`, `bagging_freq=1` → valid에서 1200라운드까지 계속
+개선되어 `best_iteration=1200`(상한 도달, 더 큰 `n_estimators`면 추가 개선 여지 있음).
+
+**최종 결과 (test, leakage-free)**
+
+| 모델/조합 | test RMSLE |
+|---|---|
+| Ridge (alpha=3) | 0.46853 |
+| FM_FTRL (18 epoch) | 0.45896 |
+| LGBM (튜닝, 1200 라운드) | 0.42742 |
+| 블렌드 (동일가중 1/3,1/3,1/3) | 0.42847 |
+| **블렌드 (valid 최적가중치 ridge=0.0 / lgbm=0.7 / fm=0.3)** | **0.42015** |
+
+`alpha`=1/3/10 그리드에서 Ridge는 여전히 3이 최적, 최적 블렌드는 **Ridge 가중치 0** — LGBM을 제대로
+튜닝하고 FM_FTRL을 섞으면 Ridge는 더 이상 블렌드에 기여하지 않습니다(15~17번 섹션 시점엔 Ridge가
+LGBM보다 우수했지만, LGBM을 튜닝한 뒤로는 역전됨). **`0.49220`(11번 섹션 LGBM 최초 baseline)에서
+`0.42015`까지, RMSLE 기준 약 14.7% 개선.**
