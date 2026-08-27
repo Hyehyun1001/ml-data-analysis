@@ -197,9 +197,18 @@ X_features = hstack([
 
 ---
 
-## 5. 모델 학습 & 평가
+## 5. 모델 학습 전략
 
-### 5-A. 공통 유틸리티
+성능 개선은 세 갈래 전략으로 접근했습니다.
+
+1. **hstack 구성 방식을 바꿔보기** (5-1) — 같은 원재료(name/description/category/수치형)를 다른 방식으로
+   인코딩/결합해서 hstack 자체를 여러 버전으로 만들어봄 (가중치 → 실패, 단계 분리 → 실패, 인코딩 방식 교체 → 성공)
+2. **baseline으로 Ridge/LightGBM을 각각 돌려서 비교** (5-2) — 같은 hstack(`X_features`)에 대해 선형모델과
+   트리모델의 성능 차이를 먼저 확인
+3. **가장 성능 좋았던 Ridge를 `alpha` 튜닝으로 추가 최적화** (5-3) — hstack 구성은 손대지 않고, 정규화 강도만
+   조정해서 더 짜낼 여지가 있는지 확인
+
+### 공통 유틸리티
 
 ```python
 def rmsle(y_test, preds):
@@ -215,9 +224,22 @@ def model_train_predict(model, X_features, y_labels):
     return preds, y_test
 ```
 `train_test_split`을 항상 `random_state=156`으로 고정하기 때문에, 아래에서 비교하는 모든 모델이 **동일한 행 구성의
-테스트셋**을 공유합니다 (다른 feature 조합이라도 행 수만 같으면 분할 인덱스가 동일) → RMSLE를 서로 공정하게 비교 가능.
+테스트셋**을 공유합니다 (다른 feature 조합/split 호출이라도 행 수만 같으면 분할 인덱스가 동일) → RMSLE를 서로 공정하게 비교 가능.
 
-### 5-B. 가중치 기반 `combine_features` (Ridge 전용 실험) — ⚠️ 보류, 노트북에서 주석 처리됨
+---
+
+## 5-1. 전략 ① — hstack 구성 방식을 바꿔보기
+
+같은 벡터화/인코딩 결과물(`X_name`, `X_descp`, `X_cat[...]`, `X_num`)을 어떻게 조합·변형하느냐에 따라
+결과가 어떻게 달라지는지 4가지 버전을 실험했습니다. **컬럼 순서 자체는 Ridge/LightGBM 둘 다 결과에 영향을
+주지 않지만**(각 컬럼을 독립적으로 취급), **무엇을 넣고 어떻게 인코딩했는지는 X 자체가 달라지는 것이라
+결과에 직접 영향을 줍니다.**
+
+### 5-1-a. 원본 (baseline) — 4장의 `X_features`
+
+원-핫 인코딩 + 유니그램 벡터화 그대로 hstack. 아래 모든 실험의 비교 기준점.
+
+### 5-1-b. 가중치 기반 `combine_features` — ⚠️ 실패, 노트북에서 주석 처리됨
 
 `category_name` > `shipping` > `null_penalty` > 나머지(`name`/`item_description`/`brand_name`/`item_condition_id`) 순으로
 우선순위를 두고, 해당 블록에 배수를 곱해 결합:
@@ -251,7 +273,7 @@ Ridge(원본)과 Ridge(가중치) 예측을 단순 평균한 **블렌드**도 �
 blend_preds = (linear_preds + weighted_preds) / 2
 ```
 
-### 5-C. 단계적(잔차) LightGBM 파이프라인 — "B안" — ⚠️ 보류, 노트북에서 주석 처리됨
+### 5-1-c. 단계적(잔차) LightGBM 파이프라인 — "B안" — ⚠️ 실패, 노트북에서 주석 처리됨
 
 우선순위 피처로 먼저 설명하고, 남은 피처로 잔차(residual)를 보정하는 2단계 구조:
 
@@ -290,16 +312,9 @@ staged_preds = stage1_test_pred + stage2_test_pred
 직접 분할했을 때와 동일한 행 구성이 나옵니다. → `X_priority`, `X_rest`, `y_labels` 세 가지를 동시에, 그리고
 앞선 Ridge 실험과도 동일한 테스트셋으로 맞출 수 있음.
 
-### 5-D. LightGBM 단일 모델 (베이스라인 비교용)
+### 5-1-d. LGBM 네이티브 categorical + n-gram — ✅ 채택, LightGBM 성능을 실제로 끌어올린 방법
 
-```python
-lgbm_model = LGBMRegressor(n_estimators=200, learning_rate=0.05, num_leaves=125, random_state=156)
-lgbm_preds, lgbm_y_test = model_train_predict(lgbm_model, X_features, y_labels)
-```
-
-### 5-E. LGBM 네이티브 categorical + n-gram — 신규 채택, LightGBM 성능을 실제로 끌어올린 방법
-
-5-B/5-C(가중치, 단계적 잔차)가 모두 원본 Ridge보다 못했던 원인을, "우선순위를 사람이 정하는 방식" 자체가
+5-1-b/5-1-c(가중치, 단계적 잔차)가 모두 원본 Ridge보다 못했던 원인을, "우선순위를 사람이 정하는 방식" 자체가
 아니라 **LGBM에 넣는 피처 표현 방식**에서 찾아본 시도. hstack 구조는 유지하되, 그 안에 들어가는 두 블록의
 인코딩 방식만 LGBM에 유리하게 교체함.
 
@@ -360,33 +375,111 @@ v2_preds = lgbm_v2.predict(X_test_v2)
 
 ---
 
+## 5-2. 전략 ② — Ridge vs LightGBM 베이스라인 비교
+
+5-1에서 만든 4장의 `X_features` 버전 중 **원본(5-1-a)** 을 기준으로, 선형모델(Ridge)과 트리모델(LightGBM)이
+같은 hstack에 대해 얼마나 다른 성능을 내는지 먼저 확인:
+
+```python
+# Ridge
+linear_model = Ridge(solver='lsqr', fit_intercept=False, alpha=3)
+linear_preds, linear_y_test = model_train_predict(linear_model, X_features, y_labels)
+print('Ridge RMSLE:', rmsle(linear_y_test, linear_preds))
+# Ridge RMSLE: 0.47067
+
+# LightGBM
+lgbm_model = LGBMRegressor(n_estimators=200, learning_rate=0.05, num_leaves=125, random_state=156)
+lgbm_preds, lgbm_y_test = model_train_predict(lgbm_model, X_features, y_labels)
+print('LightGBM RMSLE:', rmsle(lgbm_y_test, lgbm_preds))
+# LightGBM RMSLE: 0.49220
+```
+
+이 시점의 결론: **같은 피처 구성이면 Ridge가 LightGBM보다 낫다** (0.47067 vs 0.49220). 이 격차를 줄일 수
+있는지가 5-1-b~d의 동기가 됨 — 결과적으로 가중치/단계분리(5-1-b, 5-1-c)는 실패했고, 피처 표현 방식 교체
+(5-1-d)로 격차를 0.02154 → 0.00296까지 좁힘.
+
+---
+
+## 5-3. 전략 ③ — Ridge `alpha` 튜닝 (hstack 구성은 5-1-a 그대로 고정)
+
+5-2에서 Ridge가 가장 좋은 성능을 보였으므로, hstack 구성은 전혀 건드리지 않고 Ridge의 정규화 강도
+`alpha`만 그리드로 바꿔가며 추가 개선 여지가 있는지 확인. 11번 섹션과 동일한 `random_state=156` 분할을
+그대로 재사용해 공정하게 비교:
+
+```python
+X_train_a, X_test_a, y_train_a, y_test_a = train_test_split(
+    X_features, y_labels, test_size=0.2, random_state=156
+)
+
+alphas = [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000]
+alpha_results = []
+for a in alphas:
+    ridge_a = Ridge(solver='lsqr', fit_intercept=False, alpha=a)
+    ridge_a.fit(X_train_a, y_train_a)
+    preds_a = ridge_a.predict(X_test_a)
+    alpha_results.append((a, rmsle(y_test_a, preds_a)))
+```
+
+**결과**
+
+| alpha | RMSLE |
+|---|---|
+| 0.01 | 0.47259 |
+| 0.03 | 0.47256 |
+| 0.1 | 0.47232 |
+| 0.3 | 0.47205 |
+| 1 | 0.47140 |
+| **3** | **0.47067** ← 최적 |
+| 10 | 0.47146 |
+| 30 | 0.47533 |
+| 100 | 0.48468 |
+| 300 | 0.49964 |
+| 1000 | 0.52934 |
+
+**결론**: `alpha=3`(5-2에서 임의로 넣었던 값)이 그리드 내에서 이미 최적이었음 — 양옆(`alpha=1`: 0.47140,
+`alpha=10`: 0.47146)이 모두 더 나쁘므로 명확한 극소점. `alpha`가 너무 작으면(0.01~1) 과소 규제로 희귀
+카테고리에 살짝 과적합하고, 너무 크면(30 이상) 과도 규제로 텍스트 피처의 계수가 눌려 급격히 나빠짐
+(`alpha=1000`에서 0.52934까지 악화). 즉 **hstack 구성을 바꾸는 시도(5-1)와 달리, alpha 튜닝은 이미 최적점
+근처에 있었어서 추가 이득은 없었지만, 그 사실 자체를 실측으로 확인**한 것에 의미가 있음.
+
+---
+
 ## 6. 최종 결과 비교
 
-| 모델 | 구성 | RMSLE | 비고 |
-|---|---|---|---|
-| 🥇 **Ridge(원본)** | `X_features` 그대로, `alpha=3` | **0.47067** | **최고 성능** |
-| 🥈 **LGBM(네이티브 categorical + n-gram)** | `X_features_v2`, 5-E 참고 | **0.47363** | Ridge와 격차 0.00296까지 좁힘 |
-| 3 | Ridge Blend `(보류)` | (Ridge 원본 + Ridge 가중치) 예측 평균 | 0.47084 |
-| 4 | Ridge(가중치) `(보류)` | `combine_features()` 가중치 적용 | 0.47154 |
-| 5 | LightGBM(단일, 원-핫+유니그램) | `X_features`, `n_estimators=200` | 0.49220 |
-| 6 | B안 단계적 LGBM `(보류)` | 우선순위→잔차 2단계 LGBM | 0.49735 |
+| 순위 | 모델 | 구성 | RMSLE | 전략 |
+|---|---|---|---|---|
+| 🥇 | **Ridge(원본, alpha=3)** | `X_features` 그대로 | **0.47067** | 5-2 baseline = 5-3 튜닝 결과 (이미 최적) |
+| 🥈 | **LGBM(네이티브 categorical + n-gram)** | `X_features_v2`, 5-1-d 참고 | **0.47363** | 5-1 hstack 구성 변경 |
+| 3 | Ridge Blend `(보류)` | (Ridge 원본 + Ridge 가중치) 예측 평균 | 0.47084 | 5-1-b |
+| 4 | Ridge(가중치) `(보류)` | `combine_features()` 가중치 적용 | 0.47154 | 5-1-b |
+| 5 | LightGBM(단일, 원-핫+유니그램) | `X_features`, `n_estimators=200` | 0.49220 | 5-2 baseline |
+| 6 | B안 단계적 LGBM `(보류)` | 우선순위→잔차 2단계 LGBM | 0.49735 | 5-1-c |
 
 `(보류)` 표시된 3개는 노트북에서 코드가 주석 처리되어 더 이상 실행되지 않음 (12~14번 섹션). 현재 실제로
-실행되는 모델은 Ridge(원본, 11번), LightGBM 단일(11번), LGBM 네이티브+n-gram(15~16번) 3개.
+실행되는 것은 Ridge(원본, 11번) · LightGBM 단일(11번) · LGBM 네이티브+n-gram(15~16번) · Ridge alpha
+그리드(17번) 4가지.
 
-### 인사이트
+### 전략별 인사이트
 
-- **원본 Ridge가 여전히 최고 성능**이지만, **LGBM은 피처 표현 방식만 바꿔서 큰 폭으로 따라잡음**
-  (RMSLE 0.49220 → 0.47363, 약 3.8% 개선). "사람이 정한 우선순위 가중치"보다 "모델 구조에 맞는 피처 인코딩"이
-  실제로 유효했다는 것을 보여주는 결과.
-- 5-B(가중치)/5-C(단계적 잔차)가 실패했던 이유: Ridge는 정규화된 최소제곱법으로 **데이터에 최적인 계수
-  배분을 스스로 찾아내는데**, 여기에 사람이 정한 우선순위(3배 가중치, 2단계 분리)를 강제로 얹으면 데이터가
-  실제로 원했던 최적 균형에서 벗어남.
-- 5-E(네이티브 categorical + n-gram)가 성공했던 이유는 반대로, **모델(LGBM)의 구조적 특성에 맞춰 피처의
-  "표현 방식"만 바꾼 것** — 우선순위를 강제하지 않고, 트리 모델이 원-핫보다 라벨 인코딩+categorical_feature를
-  더 효율적으로 분기하는 특성, 그리고 n-gram으로 늘어난 표현력을 그대로 살렸음.
-- 그럼에도 Ridge가 여전히 근소하게 앞서는 것은, 이 데이터의 핵심 신호가 5만+ 차원의 고차원 sparse 텍스트
-  벡터에 있고 **선형모델이 이런 초고차원 sparse 구조를 트리 기반보다 잘 살리는 경향**이 있기 때문으로 보임.
+**전략 ① (5-1) hstack 구성 방식을 바꾼 결과 — 절반은 성공, 절반은 실패**
+- 5-1-b(가중치)/5-1-c(단계 분리) 모두 원본보다 못했음. Ridge는 정규화된 최소제곱법으로 **데이터에 최적인
+  계수 배분을 스스로 찾아내는데**, 여기에 사람이 정한 우선순위(3배 가중치, 2단계 분리)를 강제로 얹으면
+  데이터가 실제로 원했던 최적 균형에서 벗어남.
+- 5-1-d(네이티브 categorical + n-gram)는 반대로 성공 — **모델(LGBM)의 구조적 특성에 맞춰 피처의 "표현
+  방식"만 바꾼 것**이 핵심. 우선순위를 강제하지 않고, 트리 모델이 원-핫보다 라벨 인코딩+`categorical_feature`를
+  더 효율적으로 분기하는 특성과 n-gram으로 늘어난 표현력을 그대로 살려서 LightGBM RMSLE를 0.49220 →
+  0.47363로 약 3.8% 개선.
+- 결론: **"우선순위를 사람이 강제하는 방식"보다 "모델 구조에 맞는 인코딩으로 바꾸는 방식"이 유효했음.**
+
+**전략 ② (5-2) Ridge vs LightGBM 베이스라인**
+- 같은 hstack(`X_features`)에 대해 Ridge(0.47067)가 LightGBM(0.49220)보다 확실히 우수. 이 데이터의 핵심
+  신호가 5만+ 차원 고차원 sparse 텍스트 벡터 위주라 **선형모델이 트리 기반보다 이런 구조를 잘 살리는 경향**
+  때문으로 보임 (전략 ①에서 LGBM 격차를 크게 좁혔지만 완전히 역전하진 못함).
+
+**전략 ③ (5-3) Ridge alpha 튜닝**
+- hstack 구성은 그대로 두고 `alpha`만 `[0.01, 1000]` 범위로 탐색한 결과, 기존에 쓰던 `alpha=3`이 이미
+  그리드 내 최적값이었음(RMSLE 0.47067, 변화 없음). 즉 이 방향에서는 추가로 짜낼 성능이 없었지만, 실측으로
+  "현재 alpha가 이미 최적 근처"임을 확인한 것 자체가 성과.
 
 ---
 
@@ -400,10 +493,11 @@ v2_preds = lgbm_v2.predict(X_test_v2)
 - 섹션 1~2: 데이터 로드 및 기본 탐색
 - 섹션 3~8-1: 전처리 (2장)
 - 섹션 9~10-1: 벡터화/인코딩, hstack, 학습 전 데이터 시각화 (3~4장)
-- 섹션 11: Ridge vs LightGBM 기본 비교, `model_train_predict`/`rmsle` 정의 (5-A, 5-D)
-- 섹션 12: `(보류, 코드 주석 처리)` 가중치 `combine_features` + Ridge 블렌드 (5-B)
-- 섹션 13~14: `(보류, 코드 주석 처리)` B안 단계적 LGBM + 지표 비교 (5-C)
-- 섹션 15~16: LGBM 네이티브 categorical + n-gram + 최종 지표 비교 (5-E, 6장)
+- 섹션 11: `model_train_predict`/`rmsle` 정의, Ridge vs LightGBM 베이스라인 비교 (5-2)
+- 섹션 12: `(보류, 코드 주석 처리)` 가중치 `combine_features` + Ridge 블렌드 (5-1-b)
+- 섹션 13~14: `(보류, 코드 주석 처리)` B안 단계적 LGBM + 지표 비교 (5-1-c)
+- 섹션 15~16: LGBM 네이티브 categorical + n-gram + 지표 비교 (5-1-d)
+- 섹션 17: Ridge `alpha` 그리드서치 (5-3)
 
 **주의사항**
 - `mercari_df['price']`는 섹션 7(로그 변환) 이후 로그 스케일로 덮어써지므로, `X_features`에 절대 포함하지 않도록 주의.
@@ -417,7 +511,7 @@ v2_preds = lgbm_v2.predict(X_test_v2)
 ## 8. 향후 개선 아이디어 (미적용)
 
 - `TruncatedSVD`로 hstack 이후 차원 축소 시도 (현재는 `max_features` 캡만 적용)
-- Ridge `alpha` 그리드/베이지안 탐색으로 정규화 강도 튜닝 (현재 `alpha=3` 고정, 튜닝 안 됨)
 - `max_features`(어휘 크기) 확대/축소에 따른 RMSLE 민감도 실험
-- LGBM(5-E)에도 `early_stopping_rounds`/`num_leaves` 등 하이퍼파라미터 튜닝 적용
-- 수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 5-B 재시도
+- LGBM(5-1-d)에도 `early_stopping_rounds`/`num_leaves`/`learning_rate` 등 하이퍼파라미터 튜닝 적용 (alpha 튜닝처럼 그리드서치)
+- Ridge `alpha`를 더 촘촘한 그리드(예: 1~5 사이 0.5 간격)로 재탐색해 소수점 단위 추가 개선 여지 확인
+- 수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 5-1-b 재시도
