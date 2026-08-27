@@ -1,0 +1,790 @@
+<meta charset="UTF-8">
+<title>Mercari 가격예측 리포트</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --surface-2: #f3f2ed;
+    --ink-1:     #0b0b0b;
+    --ink-2:     #52514e;
+    --ink-3:     #898781;
+    --grid:      #e1e0d9;
+    --baseline:  #c3c2b7;
+    --border:    rgba(11,11,11,0.10);
+    --accent:    #2a78d6;
+    --accent-2:  #eb6834;
+    --aqua:      #1baf7a;
+    --yellow:    #eda100;
+    --magenta:   #e87ba4;
+    --violet:    #4a3aa7;
+    --good:      #0ca30c;
+    --shadow:    0 1px 2px rgba(11,11,11,0.04), 0 8px 24px rgba(11,11,11,0.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --surface-2: #201f1c;
+      --ink-1:     #ffffff;
+      --ink-2:     #c3c2b7;
+      --ink-3:     #898781;
+      --grid:      #2c2c2a;
+      --baseline:  #383835;
+      --border:    rgba(255,255,255,0.10);
+      --accent:    #3987e5;
+      --accent-2:  #d95926;
+      --aqua:      #199e70;
+      --yellow:    #c98500;
+      --magenta:   #d55181;
+      --violet:    #9085e9;
+      --good:      #0ca30c;
+      --shadow:    0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --surface-2: #201f1c;
+    --ink-1:     #ffffff;
+    --ink-2:     #c3c2b7;
+    --ink-3:     #898781;
+    --grid:      #2c2c2a;
+    --baseline:  #383835;
+    --border:    rgba(255,255,255,0.10);
+    --accent:    #3987e5;
+    --accent-2:  #d95926;
+    --aqua:      #199e70;
+    --yellow:    #c98500;
+    --magenta:   #d55181;
+    --violet:    #9085e9;
+    --good:      #0ca30c;
+    --shadow:    0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--page);
+    color:var(--ink-1);
+    font-family:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background: var(--accent); color:#fff; }
+
+  h1,h2,h3{ font-family:"IBM Plex Serif", Georgia, serif; font-weight:600; text-wrap:balance; color:var(--ink-1); margin:0; }
+  code, .num{ font-family:"IBM Plex Mono", ui-monospace, monospace; font-variant-numeric:tabular-nums; }
+
+  a{ color:var(--accent); }
+
+  .shell{ display:grid; grid-template-columns: 220px minmax(0,1fr); gap:0 40px; max-width:1180px; margin:0 auto; padding: 28px 24px 100px; }
+  @media (max-width: 880px){ .shell{ grid-template-columns: 1fr; } }
+
+  /* ---- side nav ---- */
+  nav.toc{ position:sticky; top:24px; align-self:start; font-size:0.85rem; }
+  @media (max-width: 880px){
+    nav.toc{ position:static; display:flex; overflow-x:auto; gap:6px; padding-bottom:10px; margin-bottom:8px; border-bottom:1px solid var(--border); }
+    nav.toc a{ flex:0 0 auto; }
+  }
+  nav.toc .eyebrow{ font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-3); margin-bottom:10px; display:block; }
+  nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; counter-reset:tocnum; }
+  @media (max-width:880px){ nav.toc ol{ flex-direction:row; } }
+  nav.toc a{
+    counter-increment:tocnum;
+    display:flex; gap:8px; align-items:baseline;
+    padding:7px 10px; border-radius:7px; text-decoration:none;
+    color:var(--ink-2); white-space:nowrap;
+  }
+  nav.toc a::before{
+    content: counter(tocnum, decimal-leading-zero);
+    font-family:"IBM Plex Mono", monospace; font-size:0.72rem; color:var(--ink-3);
+  }
+  nav.toc a:hover{ background:var(--surface-2); color:var(--ink-1); }
+
+  main{ min-width:0; }
+
+  /* ---- header ---- */
+  header.hero{ padding: 10px 0 30px; border-bottom:1px solid var(--border); margin-bottom:36px; }
+  header.hero .eyebrow{ font-size:0.72rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:10px; }
+  header.hero h1{ font-size:clamp(1.7rem, 3.4vw, 2.35rem); margin-bottom:10px; }
+  header.hero p.lede{ max-width:62ch; color:var(--ink-2); font-size:1.02rem; }
+
+  .stat-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-top:22px; }
+  .stat-tile{ background:var(--surface); padding:14px 16px; }
+  .stat-tile .v{ font-family:"IBM Plex Mono",monospace; font-size:1.35rem; font-weight:600; font-variant-numeric:tabular-nums; }
+  .stat-tile .l{ font-size:0.72rem; color:var(--ink-3); margin-top:3px; }
+
+  section{ margin-bottom:56px; scroll-margin-top:22px; }
+  section > .sec-head{ margin-bottom:18px; }
+  section > .sec-head .eyebrow{ font-size:0.72rem; letter-spacing:0.09em; text-transform:uppercase; color:var(--ink-3); margin-bottom:6px; }
+  section > .sec-head h2{ font-size:1.45rem; }
+  section > .sec-head p{ color:var(--ink-2); max-width:68ch; margin-top:8px; font-size:0.94rem; }
+
+  /* ---- phase flow ---- */
+  .phase-list{ display:flex; flex-direction:column; gap:10px; }
+  .phase{ border:1px solid var(--border); border-radius:12px; background:var(--surface); overflow:hidden; }
+  .phase summary{ list-style:none; cursor:pointer; display:flex; align-items:center; gap:14px; padding:14px 18px; }
+  .phase summary::-webkit-details-marker{ display:none; }
+  .phase summary .ph-num{ font-family:"IBM Plex Mono",monospace; font-size:0.78rem; color:var(--accent); font-weight:600; flex:0 0 auto; }
+  .phase summary .ph-title{ font-weight:600; flex:1 1 auto; }
+  .phase summary .ph-meta{ font-size:0.78rem; color:var(--ink-3); flex:0 0 auto; }
+  .phase summary .chev{ transition:transform .15s ease; color:var(--ink-3); }
+  .phase[open] summary .chev{ transform:rotate(90deg); }
+  .phase .ph-body{ padding:0 18px 16px 52px; color:var(--ink-2); font-size:0.9rem; }
+  .phase .ph-body ul{ margin:6px 0 0; padding-left:18px; }
+  .phase .ph-body li{ margin-bottom:4px; }
+  .phase .ph-body .cellref{ font-family:"IBM Plex Mono",monospace; font-size:0.76rem; color:var(--ink-3); }
+
+  /* ---- concept cards ---- */
+  .concept-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+  .concept{ border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:16px 18px; }
+  .concept .c-icon{ width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; background:var(--surface-2); margin-bottom:10px; font-family:"IBM Plex Mono",monospace; font-size:0.85rem; font-weight:600; color:var(--accent); }
+  .concept h3{ font-size:0.98rem; margin-bottom:6px; }
+  .concept p{ font-size:0.85rem; color:var(--ink-2); margin:0; }
+
+  /* ---- decision table ---- */
+  .table-wrap{ overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+  table.dec{ border-collapse:collapse; width:100%; min-width:640px; font-size:0.87rem; background:var(--surface); }
+  table.dec th{ text-align:left; font-size:0.7rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-3); font-weight:600; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--surface-2); }
+  table.dec td{ padding:12px 16px; border-bottom:1px solid var(--border); color:var(--ink-2); vertical-align:top; }
+  table.dec tr:last-child td{ border-bottom:none; }
+  table.dec td.topic{ color:var(--ink-1); font-weight:600; white-space:nowrap; }
+  .pill{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:99px; font-size:0.76rem; font-weight:600; white-space:nowrap; }
+  .pill.yes{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .pill.no{ background:var(--surface-2); color:var(--ink-3); }
+
+  /* ---- chart cards ---- */
+  .chart-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px; }
+  .chart-card{ border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:18px 20px 14px; box-shadow:var(--shadow); }
+  .chart-card.full{ grid-column:1/-1; }
+  .chart-card h3{ font-size:0.92rem; margin-bottom:2px; }
+  .chart-card .sub{ font-size:0.78rem; color:var(--ink-3); margin-bottom:12px; }
+  .chart-card svg{ width:100%; height:auto; display:block; overflow:visible; }
+  .legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:0.78rem; color:var(--ink-2); margin-top:8px; }
+  .legend .lg-item{ display:flex; align-items:center; gap:6px; }
+  .legend .sw{ width:10px; height:10px; border-radius:3px; flex:0 0 auto; }
+
+  .axis-label{ font-size:9px; fill:var(--ink-3); font-family:"IBM Plex Mono",monospace; }
+  .gridline{ stroke:var(--grid); stroke-width:1; }
+  .baseline{ stroke:var(--baseline); stroke-width:1; }
+
+  details.tbl-toggle{ margin-top:10px; }
+  details.tbl-toggle summary{ cursor:pointer; font-size:0.76rem; color:var(--accent); list-style:none; }
+  details.tbl-toggle summary::-webkit-details-marker{ display:none; }
+  details.tbl-toggle table{ width:100%; border-collapse:collapse; margin-top:8px; font-size:0.78rem; }
+  details.tbl-toggle th, details.tbl-toggle td{ text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); color:var(--ink-2); font-variant-numeric:tabular-nums; }
+
+  /* shared tooltip */
+  #viz-tip{ position:fixed; z-index:50; pointer-events:none; background:var(--ink-1); color:var(--page); font-size:0.76rem; font-family:"IBM Plex Mono",monospace; padding:6px 10px; border-radius:7px; opacity:0; transform:translate(-50%,-120%); transition:opacity .08s ease; white-space:nowrap; }
+
+  .callout{ display:flex; gap:14px; align-items:flex-start; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); padding:14px 18px; font-size:0.87rem; color:var(--ink-2); }
+  .callout b{ color:var(--ink-1); }
+
+  .pred-table-wrap{ overflow-x:auto; }
+  table.pred{ border-collapse:collapse; width:100%; min-width:680px; font-size:0.82rem; }
+  table.pred th{ text-align:right; padding:9px 12px; font-size:0.68rem; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-3); border-bottom:1px solid var(--border); }
+  table.pred th:first-child, table.pred td:first-child{ text-align:left; }
+  table.pred td{ text-align:right; padding:9px 12px; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; color:var(--ink-2); }
+  table.pred td.name{ color:var(--ink-1); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.pred td.err{ font-weight:600; }
+  table.pred td.err.good{ color:var(--good); }
+  table.pred td.err.bad{ color:var(--accent-2); }
+
+  footer{ border-top:1px solid var(--border); padding-top:22px; margin-top:20px; color:var(--ink-3); font-size:0.82rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+</style>
+
+<div id="viz-tip"></div>
+
+<div class="shell">
+  <nav class="toc">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><a href="#flow">진행 순서</a></li>
+      <li><a href="#concepts">핵심 개념</a></li>
+      <li><a href="#decisions">설계 결정</a></li>
+      <li><a href="#data">데이터 특성</a></li>
+      <li><a href="#brand">브랜드 보강</a></li>
+      <li><a href="#features">Feature 구성</a></li>
+      <li><a href="#model">모델 학습</a></li>
+      <li><a href="#next">다음 단계</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">YWK · 04_regression_mercari</div>
+      <h1>Mercari 가격예측 파이프라인 리포트</h1>
+      <p class="lede">brand_name 결측치를 description 매칭으로 채우고, 카테고리·텍스트·수치 feature를 결합해 Ridge와 LightGBM으로 가격을 예측하기까지 — 실제 실행 결과를 기준으로 정리했습니다.</p>
+      <div class="stat-row">
+        <div class="stat-tile"><div class="v">1,481,609</div><div class="l">정제 후 전체 행</div></div>
+        <div class="stat-tile"><div class="v">42.7%</div><div class="l">brand_name 원결측률</div></div>
+        <div class="stat-tile"><div class="v">85,529</div><div class="l">최종 feature 수</div></div>
+        <div class="stat-tile"><div class="v">0.4512</div><div class="l">LightGBM RMSLE</div></div>
+      </div>
+    </header>
+
+    <!-- ================= FLOW ================= -->
+    <section id="flow">
+      <div class="sec-head">
+        <div class="eyebrow">01 · Pipeline</div>
+        <h2>진행 순서</h2>
+        <p>노트북 셀은 실제로 8단계로 묶입니다. 클릭하면 각 단계에서 무엇을, 왜 했는지 펼쳐집니다.</p>
+      </div>
+      <div class="phase-list" id="phase-list"></div>
+    </section>
+
+    <!-- ================= CONCEPTS ================= -->
+    <section id="concepts">
+      <div class="sec-head">
+        <div class="eyebrow">02 · Concepts</div>
+        <h2>핵심 개념</h2>
+        <p>파이프라인 전반에 반복해서 등장하는 원리 6가지.</p>
+      </div>
+      <div class="concept-grid" id="concept-grid"></div>
+    </section>
+
+    <!-- ================= DECISIONS ================= -->
+    <section id="decisions">
+      <div class="sec-head">
+        <div class="eyebrow">03 · Trade-offs</div>
+        <h2>설계 결정</h2>
+        <p>진행 중 검토했던 선택지와, 실제로 채택한 방향입니다.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="dec">
+          <thead><tr><th>주제</th><th>검토했던 선택지</th><th>채택</th></tr></thead>
+          <tbody id="dec-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= DATA ================= -->
+    <section id="data">
+      <div class="sec-head">
+        <div class="eyebrow">04 · Raw data</div>
+        <h2>데이터 특성</h2>
+        <p>1,482,535행 원본 기준. price는 0원 이하 874건, $2,000 초과 3건을 제거하고 log1p로 변환했습니다.</p>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>가격 분포 — 원본</h3>
+          <div class="sub">단위: $ · 중앙값 $17 · 평균 $26.75</div>
+          <div id="chart-price-raw"></div>
+        </div>
+        <div class="chart-card">
+          <h3>가격 분포 — log1p 변환 후</h3>
+          <div class="sub">치우침이 완화되어 정규분포에 더 가까워짐</div>
+          <div id="chart-price-log"></div>
+        </div>
+        <div class="chart-card">
+          <h3>item_condition_id 분포</h3>
+          <div class="sub">순서형 수치로 그대로 사용 (원-핫 대신)</div>
+          <div id="chart-condition"></div>
+        </div>
+        <div class="chart-card">
+          <h3>결측치 현황 (원본)</h3>
+          <div class="sub">전체 1,482,535행 기준</div>
+          <div id="chart-missing"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= BRAND ================= -->
+    <section id="brand">
+      <div class="sec-head">
+        <div class="eyebrow">05 · Brand matching</div>
+        <h2>브랜드 보강 결과</h2>
+        <p>train에서만 사전(4,535개 브랜드)을 만들고, description에서 단어 경계 매칭으로 결측치를 채운 뒤 test엔 동일 사전을 적용만 했습니다.</p>
+      </div>
+      <div class="callout">
+        <span>🏷️</span>
+        <span><b>train 42.7%</b> 결측 → 매칭 후 <b>결측 0건</b>. 매칭 실패분은 전부 <b>Unknown</b>으로 통일해 test의 unseen 브랜드까지 같은 규칙으로 처리됩니다.</span>
+      </div>
+      <div class="chart-grid" style="margin-top:16px;">
+        <div class="chart-card full">
+          <h3>train 브랜드 상위 빈도 (매칭·통일 처리 후)</h3>
+          <div class="sub">Unknown은 매칭 실패 + 원래 결측이었던 값이 합쳐진 결과</div>
+          <div id="chart-brand-top"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FEATURES ================= -->
+    <section id="features">
+      <div class="sec-head">
+        <div class="eyebrow">06 · Feature matrix</div>
+        <h2>최종 Feature 구성</h2>
+        <p>X_train 크기 1,185,287 × 85,529. 텍스트(TF-IDF)가 전체 feature의 대부분을 차지합니다.</p>
+      </div>
+      <div class="chart-card full">
+        <h3>85,529개 feature의 구성 비율</h3>
+        <div class="sub">brand/category 원-핫 5,527 · 수치 1 · shipping 1 · name TF-IDF 30,000 · description TF-IDF 50,000</div>
+        <div id="chart-feature-stack"></div>
+      </div>
+    </section>
+
+    <!-- ================= MODEL ================= -->
+    <section id="model">
+      <div class="sec-head">
+        <div class="eyebrow">07 · Training</div>
+        <h2>모델 학습 &amp; 평가</h2>
+        <p>text_cleaning 숫자 처리와 Ridge alpha를 먼저 튜닝한 뒤, 베이스라인 Ridge와 GBM 계열 LightGBM을 같은 feature·같은 test_df로 비교했습니다. (RMSLE, 낮을수록 좋음)</p>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>텍스트 클렌징: 숫자 제거 vs 유지</h3>
+          <div class="sub">숫자(4gb, 32gb 등)를 유지하니 Ridge RMSLE가 개선됨</div>
+          <div id="chart-digits-compare"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Ridge Alpha 스윕</h3>
+          <div class="sub">alpha=3.0에서 RMSLE 최적 - 전형적인 편향/분산 U자 곡선</div>
+          <div id="chart-alpha-sweep"></div>
+        </div>
+        <div class="chart-card">
+          <h3>RMSLE 비교</h3>
+          <div class="sub">GBM이 베이스라인 대비 1.68% 개선</div>
+          <div id="chart-rmsle-compare"></div>
+        </div>
+        <div class="chart-card">
+          <h3>LightGBM 학습 곡선</h3>
+          <div class="sub">2000라운드까지 early stopping 없이 계속 개선 중</div>
+          <div id="chart-learning-curve"></div>
+          <div class="legend" id="legend-curve"></div>
+        </div>
+        <div class="chart-card full">
+          <h3>Feature Importance Top 15 (gain 기준)</h3>
+          <div class="sub">shipping·브랜드·카테고리·텍스트 단어가 고르게 상위권</div>
+          <div id="chart-importance"></div>
+        </div>
+        <div class="chart-card full">
+          <h3>예측 샘플 비교 (test_df 상위 10건)</h3>
+          <div class="sub">실제 가격 vs Ridge vs LightGBM (원래 달러 스케일로 복원)</div>
+          <div class="pred-table-wrap"><table class="pred" id="pred-table"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="next">
+      <div class="sec-head">
+        <div class="eyebrow">08 · Follow-up</div>
+        <h2>다음 단계 제안</h2>
+      </div>
+      <div class="concept-grid">
+        <div class="concept"><div class="c-icon">↑</div><h3>num_boost_round 증량</h3><p>2000라운드에서 valid rmse가 여전히 하락 중 — 3000~5000 + early stopping으로 재학습해볼 여지가 있습니다.</p></div>
+        <div class="concept"><div class="c-icon">⚙</div><h3>매칭 속도 최적화</h3><p>현재 정규식 alternation 방식. 브랜드 수가 더 늘면 Aho-Corasick 검토.</p></div>
+        <div class="concept"><div class="c-icon">🔍</div><h3>브랜드 오탐 점검</h3><p>"AND", "PINK"처럼 일반 단어와 겹치는 상위 브랜드의 매칭 정확도를 표본 점검해볼 것.</p></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>YWK · Mercari 가격 추천 모델 · 04_regression_mercari</span>
+      <span>실행 결과 기준 (random_state=42)</span>
+    </footer>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var isDark = function(){
+    var root = document.documentElement;
+    if (root.getAttribute('data-theme') === 'dark') return true;
+    if (root.getAttribute('data-theme') === 'light') return false;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+  var css = function(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); };
+  var fmt = function(n){ return Math.round(n).toLocaleString('en-US'); };
+  var fmt1 = function(n){ return n.toLocaleString('en-US', {minimumFractionDigits:1, maximumFractionDigits:1}); };
+
+  var tip = document.getElementById('viz-tip');
+  function showTip(evt, html){
+    tip.innerHTML = html;
+    tip.style.left = evt.clientX + 'px';
+    tip.style.top = evt.clientY + 'px';
+    tip.style.opacity = 1;
+  }
+  function hideTip(){ tip.style.opacity = 0; }
+
+  var NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  /* ---------------- horizontal bar chart ---------------- */
+  function renderHBars(containerId, items, opts){
+    opts = opts || {};
+    var W = 640, rowH = opts.rowH || 26, gap = 6, padL = opts.padL || 210, padR = 60, padTop = 6;
+    var H = padTop*2 + items.length*(rowH+gap) - gap;
+    var max = opts.max || Math.max.apply(null, items.map(function(d){return d.value;}));
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H, preserveAspectRatio:'xMidYMid meet'});
+    var barMax = W - padL - padR;
+
+    items.forEach(function(d, i){
+      var y = padTop + i*(rowH+gap);
+      var w = Math.max(2, (d.value/max) * barMax);
+      var color = d.tone || css('--accent');
+
+      var label = svgEl('text', {x: padL - 10, y: y+rowH/2+4, 'text-anchor':'end', class:'axis-label', fill: css('--ink-2')});
+      label.style.fontSize = '10.5px';
+      label.textContent = d.label;
+      svg.appendChild(label);
+
+      var track = svgEl('rect', {x:padL, y:y+4, width:barMax, height:rowH-8, rx:4, fill:'none'});
+      svg.appendChild(track);
+
+      var rect = svgEl('rect', {x:padL, y:y+4, width:w, height:rowH-8, rx:4, fill:color, style:'cursor:pointer'});
+      rect.addEventListener('mousemove', function(e){ showTip(e, d.label+' &nbsp; <b>'+ (opts.valueFmt?opts.valueFmt(d.value):fmt(d.value)) +'</b>'); });
+      rect.addEventListener('mouseleave', hideTip);
+      svg.appendChild(rect);
+
+      var vt = svgEl('text', {x: padL + w + 8, y:y+rowH/2+4, class:'axis-label', fill: css('--ink-3')});
+      vt.style.fontSize = '10px';
+      vt.textContent = opts.valueFmt ? opts.valueFmt(d.value) : fmt(d.value);
+      svg.appendChild(vt);
+    });
+
+    var host = document.getElementById(containerId);
+    host.innerHTML = '';
+    host.appendChild(svg);
+  }
+
+  /* ---------------- vertical bar / histogram chart ---------------- */
+  function renderVBars(containerId, items, opts){
+    opts = opts || {};
+    var W = 620, H = 240, padL = 46, padR = 12, padT = 12, padB = 40;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var max = Math.max.apply(null, items.map(function(d){return d.value;}));
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H, preserveAspectRatio:'xMidYMid meet'});
+
+    // gridlines (4)
+    for (var g=0; g<=4; g++){
+      var gy = padT + plotH - (g/4)*plotH;
+      svg.appendChild(svgEl('line', {x1:padL, x2:W-padR, y1:gy, y2:gy, class:'gridline'}));
+      var gl = svgEl('text', {x:padL-6, y:gy+3, 'text-anchor':'end', class:'axis-label'});
+      gl.textContent = fmt(max*g/4);
+      svg.appendChild(gl);
+    }
+    svg.appendChild(svgEl('line', {x1:padL, x2:W-padR, y1:padT+plotH, y2:padT+plotH, class:'baseline'}));
+
+    var bw = plotW/items.length;
+    items.forEach(function(d,i){
+      var h = (d.value/max)*plotH;
+      var x = padL + i*bw + bw*0.12;
+      var w = bw*0.76;
+      var y = padT + plotH - h;
+      var rect = svgEl('rect', {x:x, y:y, width:w, height:Math.max(1,h), rx:3, fill: css('--accent'), style:'cursor:pointer'});
+      rect.addEventListener('mousemove', function(e){ showTip(e, d.label+' &nbsp; <b>'+fmt(d.value)+'</b>'); });
+      rect.addEventListener('mouseleave', hideTip);
+      svg.appendChild(rect);
+
+      var lbl = svgEl('text', {x:x+w/2, y:padT+plotH+14, 'text-anchor':'middle', class:'axis-label'});
+      lbl.textContent = d.label;
+      svg.appendChild(lbl);
+    });
+
+    var host = document.getElementById(containerId);
+    host.innerHTML = '';
+    host.appendChild(svg);
+  }
+
+  /* ---------------- line chart (multi-series) ---------------- */
+  function renderLine(containerId, series, opts){
+    opts = opts || {};
+    var W = 620, H = 260, padL = 46, padR = 16, padT = 14, padB = 30;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var xs = series[0].points.map(function(p){return p.x;});
+    var xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+    var allY = [].concat.apply([], series.map(function(s){return s.points.map(function(p){return p.y;});}));
+    var yMin = opts.yMin!==undefined ? opts.yMin : Math.min.apply(null, allY);
+    var yMax = opts.yMax!==undefined ? opts.yMax : Math.max.apply(null, allY);
+    var yPad = (yMax-yMin)*0.08; yMin -= yPad; yMax += yPad;
+
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H, preserveAspectRatio:'xMidYMid meet'});
+    function X(x){ return padL + (x-xMin)/(xMax-xMin)*plotW; }
+    function Y(y){ return padT + plotH - (y-yMin)/(yMax-yMin)*plotH; }
+
+    for (var g=0; g<=4; g++){
+      var gy = padT + (g/4)*plotH;
+      svg.appendChild(svgEl('line', {x1:padL, x2:W-padR, y1:gy, y2:gy, class:'gridline'}));
+      var val = yMax - (g/4)*(yMax-yMin);
+      var gl = svgEl('text', {x:padL-6, y:gy+3, 'text-anchor':'end', class:'axis-label'});
+      gl.textContent = val.toFixed(2);
+      svg.appendChild(gl);
+    }
+    svg.appendChild(svgEl('line', {x1:padL, x2:W-padR, y1:padT+plotH, y2:padT+plotH, class:'baseline'}));
+
+    // x ticks
+    [xs[0], xs[Math.floor(xs.length/2)], xs[xs.length-1]].forEach(function(xv){
+      var xl = svgEl('text', {x:X(xv), y:H-8, 'text-anchor':'middle', class:'axis-label'});
+      xl.textContent = xv;
+      svg.appendChild(xl);
+    });
+
+    // reference line (e.g. Ridge baseline)
+    if (opts.refLine){
+      var ry = Y(opts.refLine.y);
+      svg.appendChild(svgEl('line', {x1:padL, x2:W-padR, y1:ry, y2:ry, stroke:css('--ink-3'), 'stroke-width':1, 'stroke-dasharray':'3,3'}));
+      var rl = svgEl('text', {x:W-padR, y:ry-4, 'text-anchor':'end', class:'axis-label'});
+      rl.textContent = opts.refLine.label;
+      svg.appendChild(rl);
+    }
+
+    series.forEach(function(s){
+      var d = s.points.map(function(p,i){ return (i===0?'M':'L')+X(p.x)+' '+Y(p.y); }).join(' ');
+      svg.appendChild(svgEl('path', {d:d, fill:'none', stroke:s.color, 'stroke-width':2, 'stroke-linecap':'round', 'stroke-linejoin':'round'}));
+    });
+
+    // hover crosshair
+    var hoverLine = svgEl('line', {x1:0,x2:0,y1:padT,y2:padT+plotH, stroke:css('--ink-3'), 'stroke-width':1, opacity:0});
+    svg.appendChild(hoverLine);
+    var hitRect = svgEl('rect', {x:padL, y:padT, width:plotW, height:plotH, fill:'transparent', style:'cursor:crosshair'});
+    hitRect.addEventListener('mousemove', function(e){
+      var rect = svg.getBoundingClientRect();
+      var px = (e.clientX - rect.left) / rect.width * W;
+      var xv = xMin + (px-padL)/plotW*(xMax-xMin);
+      var closest = xs.reduce(function(a,b){ return Math.abs(b-xv)<Math.abs(a-xv)?b:a; });
+      var cx = X(closest);
+      hoverLine.setAttribute('x1', cx); hoverLine.setAttribute('x2', cx); hoverLine.setAttribute('opacity', 1);
+      var html = '<b>'+(opts.xLabel||'round')+' '+closest+'</b>';
+      series.forEach(function(s){
+        var pt = s.points.filter(function(p){return p.x===closest;})[0];
+        if (pt) html += '<br>'+s.name+': '+pt.y.toFixed(4);
+      });
+      showTip(e, html);
+    });
+    hitRect.addEventListener('mouseleave', function(){ hoverLine.setAttribute('opacity',0); hideTip(); });
+    svg.appendChild(hitRect);
+
+    var host = document.getElementById(containerId);
+    host.innerHTML = '';
+    host.appendChild(svg);
+
+    if (opts.legendEl){
+      var lg = document.getElementById(opts.legendEl);
+      lg.innerHTML = series.map(function(s){
+        return '<span class="lg-item"><span class="sw" style="background:'+s.color+'"></span>'+s.name+'</span>';
+      }).join('');
+    }
+  }
+
+  /* ---------------- single stacked bar ---------------- */
+  function renderStack(containerId, segs){
+    var total = segs.reduce(function(a,b){return a+b.value;},0);
+    var W = 900, H = 88, padX = 4;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H, preserveAspectRatio:'xMidYMid meet'});
+    var x = padX;
+    var barW = W - padX*2, barH = 34, y = 8;
+    segs.forEach(function(s, i){
+      var w = (s.value/total) * barW;
+      var rect = svgEl('rect', {x:x, y:y, width:Math.max(w-2,0), height:barH, rx:3, fill:s.color, style:'cursor:pointer'});
+      rect.addEventListener('mousemove', function(e){ showTip(e, s.label+' &nbsp; <b>'+fmt(s.value)+'</b> ('+(s.value/total*100).toFixed(1)+'%)'); });
+      rect.addEventListener('mouseleave', hideTip);
+      svg.appendChild(rect);
+      x += w;
+    });
+    // direct labels below (skip slivers under 2% to avoid overlap - shown via hover instead)
+    var lx = padX;
+    var ly = y + barH + 20;
+    segs.forEach(function(s){
+      var w = (s.value/total) * barW;
+      var share = s.value/total;
+      if (share >= 0.02){
+        var cx = lx + w/2;
+        var t1 = svgEl('text', {x:cx, y:ly, 'text-anchor':'middle', class:'axis-label', fill: css('--ink-1')});
+        t1.style.fontWeight = '600'; t1.style.fontSize='10.5px';
+        t1.textContent = s.label;
+        svg.appendChild(t1);
+        var t2 = svgEl('text', {x:cx, y:ly+13, 'text-anchor':'middle', class:'axis-label'});
+        t2.textContent = fmt(s.value) + ' (' + (share*100).toFixed(1) + '%)';
+        svg.appendChild(t2);
+      }
+      lx += w;
+    });
+    var host = document.getElementById(containerId);
+    host.innerHTML = '';
+    host.appendChild(svg);
+  }
+
+  /* ================= DATA ================= */
+  var C = {
+    accent: css('--accent'), accent2: css('--accent-2'), aqua: css('--aqua'),
+    yellow: css('--yellow'), magenta: css('--magenta'), violet: css('--violet'), muted: css('--ink-3')
+  };
+
+  renderVBars('chart-price-raw', [
+    {label:'0-10', value:276199},{label:'10-20', value:556586},{label:'20-30', value:280751},
+    {label:'30-40', value:133296},{label:'40-50', value:75476},{label:'50-75', value:83812},
+    {label:'75-100', value:31228},{label:'100-150', value:23933},{label:'150-200', value:9533},
+    {label:'200-300', value:6676},{label:'300+', value:4168}
+  ]);
+
+  renderVBars('chart-price-log', [
+    {label:'0-.5', value:0},{label:'.5-1', value:0},{label:'1-1.5', value:18703},{label:'1.5-2', value:79934},
+    {label:'2-2.5', value:316802},{label:'2.5-3', value:417337},{label:'3-3.5', value:333266},
+    {label:'3.5-4', value:175437},{label:'4-4.5', value:87151},{label:'4.5-5', value:32343},
+    {label:'5-5.5', value:14017},{label:'5.5-6', value:4762},{label:'6+', value:1899}
+  ]);
+
+  renderHBars('chart-condition', [
+    {label:'1 (best)', value:640549},{label:'2', value:375479},{label:'3', value:432161},
+    {label:'4', value:31962},{label:'5 (worst)', value:2384}
+  ], {padL:70, rowH:30});
+
+  renderHBars('chart-missing', [
+    {label:'brand_name', value:632682, tone:C.accent2},
+    {label:'category_name', value:6327, tone:C.accent},
+    {label:'item_description', value:6, tone:C.accent}
+  ], {padL:120, rowH:34, valueFmt:function(v){ return fmt(v)+' rows'; }});
+
+  renderHBars('chart-brand-top', [
+    {label:'Unknown (unmatched + originally missing)', value:196041, tone:C.muted},
+    {label:'AND', value:99396},
+    {label:'PINK', value:55325},
+    {label:'Nike', value:43972},
+    {label:"Victoria's Secret", value:39366}
+  ], {padL:190, rowH:30});
+
+  renderStack('chart-feature-stack', [
+    {label:'brand/category one-hot', value:5527, color:C.accent},
+    {label:'item_condition_id', value:1, color:C.accent2},
+    {label:'shipping', value:1, color:C.aqua},
+    {label:'name TF-IDF', value:30000, color:C.yellow},
+    {label:'description TF-IDF', value:50000, color:C.magenta}
+  ]);
+
+  renderHBars('chart-digits-compare', [
+    {label:'digits removed', value:0.45892, tone:C.muted},
+    {label:'digits kept', value:0.45597, tone:C.accent}
+  ], {padL:120, rowH:40, valueFmt:function(v){return v.toFixed(5);}, max:0.47});
+
+  var alphaVals = [1, 2, 3, 4, 5];
+  var alphaRmsle = [0.45597, 0.45483, 0.45447, 0.45448, 0.45468];
+  renderLine('chart-alpha-sweep', [
+    {name:'RMSLE', color:C.accent, points: alphaVals.map(function(a,i){ return {x:a, y:alphaRmsle[i]}; })}
+  ], {xLabel:'alpha', yMin:0.4540, yMax:0.4565});
+
+  renderHBars('chart-rmsle-compare', [
+    {label:'Ridge (baseline)', value:0.45894, tone:C.accent},
+    {label:'LightGBM', value:0.45122, tone:C.accent2}
+  ], {padL:120, rowH:40, valueFmt:function(v){return v.toFixed(5);}, max:0.5});
+
+  var rounds = [100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000];
+  var trainRmse = [0.534645,0.508757,0.494704,0.485094,0.477825,0.47203,0.467199,0.463014,0.459355,0.456071,0.453145,0.450405,0.447908,0.44557,0.443396,0.441387,0.439415,0.437539,0.435863,0.434161];
+  var validRmse = [0.536182,0.511156,0.498119,0.489417,0.483081,0.47814,0.47412,0.470715,0.467869,0.465379,0.463272,0.461383,0.459661,0.458082,0.456664,0.455416,0.454169,0.453068,0.452115,0.45122];
+  renderLine('chart-learning-curve', [
+    {name:'train rmse', color:C.accent, points: rounds.map(function(r,i){return {x:r,y:trainRmse[i]};})},
+    {name:'valid rmse', color:C.accent2, points: rounds.map(function(r,i){return {x:r,y:validRmse[i]};})}
+  ], {refLine:{y:0.45894, label:'Ridge 0.45894'}, legendEl:'legend-curve'});
+
+  renderHBars('chart-importance', [
+    {label:'shipping', value:135149.66},
+    {label:'name__lularoe', value:66363.93},
+    {label:"cat_sub_Shoes", value:56484.22},
+    {label:'desc__box', value:40632.72},
+    {label:'desc__authentic', value:40463.72},
+    {label:'item_condition_id', value:39177.02},
+    {label:"cat_sub_Women's Handbags", value:34320.56},
+    {label:'cat_sub2_Cell Phones', value:30429.09},
+    {label:'brand_name_Unknown', value:29385.55},
+    {label:'name__bundle', value:26768.77},
+    {label:'desc__gb', value:25615.66},
+    {label:'brand_name_Michael Kors', value:23155.70},
+    {label:'brand_name_Lululemon', value:21521.91},
+    {label:'brand_name_Louis Vuitton', value:21424.30},
+    {label:'brand_name_Kendra Scott', value:20068.82}
+  ], {padL:190, rowH:22, valueFmt:function(v){return fmt(v);}});
+
+  /* prediction table */
+  var predRows = [
+    ['lipsmakerqueen','Unknown',6.0,9.11,10.09],
+    ['watch dogs xbox','Xbox',15.0,18.26,16.44],
+    ['egyptian print high low cardigan',"FOREVER 21",12.0,13.75,10.56],
+    ['new kylie jenner lipkit maliboo','Kylie Cosmetics',13.0,20.11,20.92],
+    ['titanfall','Xbox',29.0,19.75,17.33],
+    ['high top sneakers c','Old Navy',8.0,10.21,10.42],
+    ['grey boys petticoat outfit',"Carter's",6.0,6.65,7.41],
+    ['crop top','Unknown',7.0,8.60,9.71],
+    ['like new carhartt faded glory size','Carhartt',16.0,12.74,13.56],
+    ['rae dunn spoon rest','Rae Dunn',17.0,20.02,22.32]
+  ];
+  var thead = '<thead><tr><th>상품명</th><th>브랜드</th><th>실제가</th><th>Ridge</th><th>Ridge 오차</th><th>GBM</th><th>GBM 오차</th></tr></thead>';
+  var tbody = '<tbody>' + predRows.map(function(r){
+    var rErr = r[3]-r[2], gErr = r[4]-r[2];
+    var rCls = Math.abs(rErr) < Math.abs(gErr) ? 'good' : 'bad';
+    var gCls = Math.abs(gErr) < Math.abs(rErr) ? 'good' : 'bad';
+    return '<tr><td class="name">'+r[0]+'</td><td>'+r[1]+'</td><td>$'+r[2].toFixed(2)+'</td>'+
+      '<td>$'+r[3].toFixed(2)+'</td><td class="err '+rCls+'">'+(rErr>=0?'+':'')+rErr.toFixed(2)+'</td>'+
+      '<td>$'+r[4].toFixed(2)+'</td><td class="err '+gCls+'">'+(gErr>=0?'+':'')+gErr.toFixed(2)+'</td></tr>';
+  }).join('') + '</tbody>';
+  document.getElementById('pred-table').innerHTML = thead + tbody;
+
+  /* ================= PHASES ================= */
+  var phases = [
+    {t:'데이터 로드 & 정제', cells:'cell 1-2', body:['원본 1,482,535행 로드','price ≤0 (874건) · $2,000 초과(3건) 도메인 규칙으로 제거','train_id 제거, 중복 제거 → 1,481,609행','price에 log1p 적용 (분포 왜곡 완화)']},
+    {t:'category_name 구조 분해', cells:'cell 3', body:["'Men/Tops/T-shirts' → cat_main/cat_sub/cat_sub2 3컬럼", '결측·3단계 미만인 값은 Unknown으로 보정', '순수 문자열 파싱이라 split 이전에 처리해도 leakage 없음']},
+    {t:'학습 / 테스트 분리', cells:'cell 4', body:['train_test_split(test_size=0.2, random_state=42)', 'train_df 1,185,287 / test_df 296,322', '이 지점 이후의 모든 fit은 train_df에만 적용']},
+    {t:'브랜드 보강', cells:'cell 5-6', body:['train 결측 없는 brand_name으로 사전 생성 (4,535개)', '긴 브랜드명 우선 + 단어 경계(\\b) 정규식으로 description 매칭', 'test는 같은 사전으로 적용만 (재생성 X)', 'train에 없는 값은 train/test 모두 Unknown 통일']},
+    {t:'텍스트 클렌징', cells:'cell 7-8', body:['소문자화 → 영문자 외 제거 → 불용어 제거 → 토큰화', "부정어(no/not/never/without) 보존, 'rm' 잔여토큰 제거", 'name, item_description 동일 함수로 처리']},
+    {t:'인코딩 / 벡터화', cells:'cell 9-11', body:['name·description → TfidfVectorizer (train fit, test transform)', 'brand/category → OneHotEncoder(handle_unknown=ignore)', 'item_condition_id → StandardScaler (Ridge용)']},
+    {t:'Feature 결합 & 파이프라인 저장', cells:'cell 12', body:['5개 행렬을 hstack → X_train (1,185,287 × 85,529)', '모든 전처리 객체를 mercari_pipeline.pkl 하나로 묶음', 'preprocess_new_data() 함수로 신규 데이터도 동일 재현']},
+    {t:'모델 학습 & 평가', cells:'cell 13-19', body:['RMSLE = log 스케일 RMSE (y가 이미 log1p라 바로 계산)', 'Ridge(alpha=1.0) 베이스라인 → RMSLE 0.45894', 'LightGBM(early stopping) → RMSLE 0.45122 (1.68% 개선)', 'feature importance, 예측 샘플 확인 후 모델 저장']}
+  ];
+  var pl = document.getElementById('phase-list');
+  phases.forEach(function(p, i){
+    var d = document.createElement('details');
+    d.className = 'phase';
+    if (i===0) d.open = true;
+    d.innerHTML = '<summary><span class="ph-num">PH.'+(i+1)+'</span><span class="ph-title">'+p.t+'</span><span class="ph-meta cellref">'+p.cells+'</span><span class="chev">›</span></summary>'+
+      '<div class="ph-body"><ul>'+p.body.map(function(b){return '<li>'+b+'</li>';}).join('')+'</ul></div>';
+    pl.appendChild(d);
+  });
+
+  /* ================= CONCEPTS ================= */
+  var concepts = [
+    {i:'01', t:'Leakage 방지', d:'브랜드 사전·벡터라이저·인코더 등 모든 "학습"은 train에서만 fit하고 test엔 transform만 적용.'},
+    {i:'02', t:'log1p / RMSLE', d:'치우친 price 분포를 로그로 완화. y가 이미 log 스케일이라 RMSE = RMSLE로 바로 계산.'},
+    {i:'03', t:'단어 경계 매칭', d:"정규식 \\b + 긴 브랜드명 우선 정렬로 'Kate Spade' 같은 복합 브랜드명이 깨지지 않게 매칭."},
+    {i:'04', t:'TF-IDF 벡터화', d:'텍스트를 숫자 벡터로. train에 없던 단어는 에러 없이 무시되어 새 데이터에도 안전.'},
+    {i:'05', t:'Ridge vs LightGBM', d:'선형(계수 기반) 베이스라인과, 트리 분할로 상호작용을 자동 학습하는 GBM을 비교.'},
+    {i:'06', t:'Early Stopping', d:'valid 성능이 50라운드 개선 없으면 자동 중단 — train/valid가 같이 떨어지는 동안은 과적합 아님.'}
+  ];
+  var cg = document.getElementById('concept-grid');
+  concepts.forEach(function(c){
+    var el = document.createElement('div');
+    el.className = 'concept';
+    el.innerHTML = '<div class="c-icon">'+c.i+'</div><h3>'+c.t+'</h3><p>'+c.d+'</p>';
+    cg.appendChild(el);
+  });
+
+  /* ================= DECISIONS ================= */
+  var decisions = [
+    ['brand_name 결측', '전부 미처리 vs description 매칭', 'description 매칭 + 나머지 Unknown'],
+    ['unseen 값 기준', 'train+test 합쳐 빈도컷(참고 커널 방식) vs train만 기준', 'train만 기준 (엄격 분리)'],
+    ['텍스트 벡터화', 'TF-IDF(사전 저장) vs HashingVectorizer', 'TF-IDF'],
+    ['name 컬럼', '브랜드 매칭 대상 포함 vs description만', 'description만 매칭, name은 별도 벡터화 feature로 사용'],
+    ['매칭 속도', 'Aho-Corasick vs 정규식 alternation', '정규식 alternation (필요 시 추가 최적화)'],
+    ['가격 구간화', '산점도 수동 클러스터링 vs 모델에 위임', '모델(GBM)에 위임, EDA 시각화 용도로만 사용'],
+    ['고가 이상치', '통계적 IQR/percentile 컷 vs 도메인 규칙', '도메인 규칙 ($2,000 초과 3건 제거)'],
+    ['모델 구성', '3-모델 앙상블(FTRL+FM_FTRL+LGBM) vs 단순 비교', '베이스라인(Ridge) + GBM(LightGBM) 2개 비교'],
+    ['brand_source 플래그', '추가 vs 생략', '생략 (범위 밖)']
+  ];
+  var db = document.getElementById('dec-body');
+  decisions.forEach(function(r){
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td class="topic">'+r[0]+'</td><td>'+r[1]+'</td><td><span class="pill yes">✓ '+r[2]+'</span></td>';
+    db.appendChild(tr);
+  });
+
+})();
+</script>
