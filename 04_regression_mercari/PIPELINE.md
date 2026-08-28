@@ -1,13 +1,13 @@
 # Mercari 중고거래 가격 예측 — 파이프라인 설계 문서
 
-`Mercari.ipynb` 하나만 보고도 전체 흐름을 재구성할 수 있도록, 데이터 특성 → 전처리 → 피처 엔지니어링 →
+`teamipynb/소현_mercari.ipynb` 하나만 보고도 전체 흐름을 재구성할 수 있도록, 데이터 특성 → 전처리 → 피처 엔지니어링 →
 모델 학습/평가까지의 설계와 근거를 정리한 문서입니다. 이 문서 + 노트북 코드만 있으면 동일한 파이프라인을
 처음부터 다시 구현할 수 있는 것을 목표로 합니다.
 
 ## 0. 목표와 평가지표
 
 - **문제**: 상품명, 카테고리, 브랜드, 설명글, 상품 상태, 배송비 부담 여부로 **적정 판매가(price)** 를 예측하는 회귀 문제
-- **데이터**: `../data/mercari_train.tsv` (탭 구분, 원본 shape `(1482535, 8)`)
+- **데이터**: `../../data/mercari_train.tsv` (노트북이 `teamipynb/` 하위에 있어 상대경로가 한 단계 더 깊음, 탭 구분, 원본 shape `(1482535, 8)`)
 - **평가지표**: RMSLE (Root Mean Squared Logarithmic Error) — 가격처럼 왜도가 큰 타깃에서 절대오차보다 로그오차를 재는 게 합리적
 - **핵심 설계 선택**: 타깃 `price`를 미리 `log1p`로 변환해두면, 이후 일반 회귀모델의 RMSE 최소화가 곧 RMSLE 최소화와 수학적으로 동일해짐 → 별도의 RMSLE 전용 손실함수 없이 표준 회귀 파이프라인 그대로 사용 가능
 
@@ -243,57 +243,21 @@ def model_train_predict(model, X_features, y_labels):
 | 버전 | hstack 구성 방식 | 결과 |
 |---|---|---|
 | `X_features` (원본) | name/desc 유니그램 + 범주형 원-핫(4개 블록, 5,804차원) + 수치형 | Ridge RMSLE **0.47067** (최고) |
-| `X_features_weighted` | 위와 동일 구조인데 category/shipping/null_penalty 블록에만 스칼라 곱 | Ridge RMSLE 0.47154 (더 나쁨) |
 | `X_priority`/`X_rest` (B안) | 같은 블록들을 두 그룹으로 쪼개서 별도 학습 | LGBM RMSLE 0.49735 (가장 나쁨) |
 | `X_features_v2` | name/desc 유니그램+바이그램 + 범주형 라벨 인코딩(원-핫 대신 4컬럼) | LGBM RMSLE **0.47363** (LightGBM 중 최고) |
 
 즉:
-- **값의 스케일을 바꾸면**(가중치, `X_features_weighted`) → Ridge에서 실제로 계수 학습 결과가 달라짐(정규화 페널티가 블록마다 다르게 작용)
 - **블록을 아예 분리해서 별도 모델로 학습하면**(B안, `X_priority`/`X_rest`) → 완전히 다른 학습 절차가 되어 결과가 크게 달라짐
 - **같은 컬럼을 다른 방식으로 인코딩하면**(원-핫 vs 라벨, 유니그램 vs 바이그램, `X_features_v2`) → matrix 자체의 차원과 값이 바뀌어서 모델이 보는 정보량/표현력이 달라짐
 
 정리하면 — **"어떻게 배치했는지"는 무관하지만, "무엇을 어떻게 인코딩해서 넣었는지"는 학습 결과를 결정짓는 핵심 요인**.
-아래 5-1-a~d는 이 표의 4개 버전을 각각 어떻게 만들었는지의 상세.
+아래 5-1-a~c는 이 표의 3개 버전을 각각 어떻게 만들었는지의 상세.
 
 ### 5-1-a. 원본 (baseline) — 4장의 `X_features`
 
 원-핫 인코딩 + 유니그램 벡터화 그대로 hstack. 아래 모든 실험의 비교 기준점.
 
-### 5-1-b. 가중치 기반 `combine_features` — ⚠️ 실패, 노트북에서 주석 처리됨
-
-`category_name` > `shipping` > `null_penalty` > 나머지(`name`/`item_description`/`brand_name`/`item_condition_id`) 순으로
-우선순위를 두고, 해당 블록에 배수를 곱해 결합:
-
-```python
-def combine_features(weights=None):
-    weights = weights or {'category': 3.0, 'shipping': 2.0, 'null_penalty': 2.0, 'default': 1.0}
-    num_weight_vec = np.array([weights['default'], weights['shipping'], weights['null_penalty']])
-    X_num_weighted = csr_matrix(mercari_df[NUM_COLS].astype(float).values * num_weight_vec)
-    return hstack([
-        X_name * weights['default'],
-        X_descp * weights['default'],
-        X_cat['brand_name'] * weights['default'],
-        X_cat['cat_dae'] * weights['category'],
-        X_cat['cat_jung'] * weights['category'],
-        X_cat['cat_so'] * weights['category'],
-        X_num_weighted,
-    ]).tocsr()
-
-X_features_weighted = combine_features()  # (1481603, 55807) — 구조는 동일, 값의 스케일만 다름
-```
-
-**작동 원리**: sparse matrix에 스칼라를 곱하면 구조(행/열 수)는 그대로고 값의 크기만 커집니다. Ridge는
-`‖y - Xw‖² + alpha·‖w‖²`를 최소화하는데, 어떤 블록의 값을 k배로 키우면 같은 기여도를 내는 데 필요한 계수가
-`w/k`로 작아져도 되고, `‖w‖²` 페널티는 계수 크기에 걸리므로 작아진 계수는 덜 억제됩니다 → 결과적으로 Ridge가
-그 블록을 더 적극적으로 사용하게 됨. **LightGBM에는 사실상 효과 없음** — 트리 분기는 값의 크기가 아니라
-순서/분포로 결정되기 때문.
-
-Ridge(원본)과 Ridge(가중치) 예측을 단순 평균한 **블렌드**도 함께 평가:
-```python
-blend_preds = (linear_preds + weighted_preds) / 2
-```
-
-### 5-1-c. 단계적(잔차) LightGBM 파이프라인 — "B안" — ⚠️ 실패, 노트북에서 주석 처리됨
+### 5-1-b. 단계적(잔차) LightGBM 파이프라인 — "B안" — ⚠️ 실패, 노트북에서 주석 처리됨
 
 우선순위 피처로 먼저 설명하고, 남은 피처로 잔차(residual)를 보정하는 2단계 구조:
 
@@ -306,7 +270,7 @@ X_priority = hstack([X_cat['cat_dae'], X_cat['cat_jung'], X_cat['cat_so'], X_num
 X_rest = hstack([X_name, X_descp, X_cat['brand_name'], X_num[:, [0]]]).tocsr()
 # (1481603, 54809)
 
-# 11~12번과 동일한 random_state=156으로 분할 (인덱스 공유 목적)
+# 11번과 동일한 random_state=156으로 분할 (인덱스 공유 목적)
 idx_train, idx_test = train_test_split(np.arange(X_features.shape[0]), test_size=0.2, random_state=156)
 y_arr = y_labels.to_numpy()
 y_train_stage, y_test_stage = y_arr[idx_train], y_arr[idx_test]
@@ -332,9 +296,9 @@ staged_preds = stage1_test_pred + stage2_test_pred
 직접 분할했을 때와 동일한 행 구성이 나옵니다. → `X_priority`, `X_rest`, `y_labels` 세 가지를 동시에, 그리고
 앞선 Ridge 실험과도 동일한 테스트셋으로 맞출 수 있음.
 
-### 5-1-d. LGBM 네이티브 categorical + n-gram — ✅ 채택, LightGBM 성능을 실제로 끌어올린 방법
+### 5-1-c. LGBM 네이티브 categorical + n-gram — ✅ 채택, LightGBM 성능을 실제로 끌어올린 방법
 
-5-1-b/5-1-c(가중치, 단계적 잔차)가 모두 원본 Ridge보다 못했던 원인을, "우선순위를 사람이 정하는 방식" 자체가
+5-1-b(단계적 잔차)가 원본 Ridge보다 못했던 원인을, "우선순위를 사람이 정하는 방식" 자체가
 아니라 **LGBM에 넣는 피처 표현 방식**에서 찾아본 시도. hstack 구조는 유지하되, 그 안에 들어가는 두 블록의
 인코딩 방식만 LGBM에 유리하게 교체함.
 
@@ -397,7 +361,7 @@ v2_preds = lgbm_v2.predict(X_test_v2)
 
 ## 5-2. 전략 ② — Ridge vs LightGBM 베이스라인 비교
 
-5-1에서 만든 4장의 `X_features` 버전 중 **원본(5-1-a)** 을 기준으로, 선형모델(Ridge)과 트리모델(LightGBM)이
+5-1에서 만든 3가지 `X_features` 버전 중 **원본(5-1-a)** 을 기준으로, 선형모델(Ridge)과 트리모델(LightGBM)이
 같은 hstack에 대해 얼마나 다른 성능을 내는지 먼저 확인:
 
 ```python
@@ -415,85 +379,53 @@ print('LightGBM RMSLE:', rmsle(lgbm_y_test, lgbm_preds))
 ```
 
 이 시점의 결론: **같은 피처 구성이면 Ridge가 LightGBM보다 낫다** (0.47067 vs 0.49220). 이 격차를 줄일 수
-있는지가 5-1-b~d의 동기가 됨 — 결과적으로 가중치/단계분리(5-1-b, 5-1-c)는 실패했고, 피처 표현 방식 교체
-(5-1-d)로 격차를 0.02154 → 0.00296까지 좁힘.
+있는지가 5-1-b~c의 동기가 됨 — 결과적으로 단계분리(5-1-b)는 실패했고, 피처 표현 방식 교체
+(5-1-c)로 격차를 0.02154 → 0.00296까지 좁힘.
 
 ---
 
-## 5-3. 전략 ③ — Ridge `alpha` 튜닝 (hstack 구성은 5-1-a 그대로 고정)
+## 5-3. 전략 ③ — Ridge `alpha` 튜닝 (hstack 구성은 5-1-a 그대로 고정, 간단 요약)
 
-5-2에서 Ridge가 가장 좋은 성능을 보였으므로, hstack 구성은 전혀 건드리지 않고 Ridge의 정규화 강도
-`alpha`만 그리드로 바꿔가며 추가 개선 여지가 있는지 확인. 11번 섹션과 동일한 `random_state=156` 분할을
-그대로 재사용해 공정하게 비교:
-
-```python
-X_train_a, X_test_a, y_train_a, y_test_a = train_test_split(
-    X_features, y_labels, test_size=0.2, random_state=156
-)
-
-alphas = [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000]
-alpha_results = []
-for a in alphas:
-    ridge_a = Ridge(solver='lsqr', fit_intercept=False, alpha=a)
-    ridge_a.fit(X_train_a, y_train_a)
-    preds_a = ridge_a.predict(X_test_a)
-    alpha_results.append((a, rmsle(y_test_a, preds_a)))
-```
-
-**결과**
-
-| alpha | RMSLE |
-|---|---|
-| 0.01 | 0.47259 |
-| 0.03 | 0.47256 |
-| 0.1 | 0.47232 |
-| 0.3 | 0.47205 |
-| 1 | 0.47140 |
-| **3** | **0.47067** ← 최적 |
-| 10 | 0.47146 |
-| 30 | 0.47533 |
-| 100 | 0.48468 |
-| 300 | 0.49964 |
-| 1000 | 0.52934 |
-
-**결론**: `alpha=3`(5-2에서 임의로 넣었던 값)이 그리드 내에서 이미 최적이었음 — 양옆(`alpha=1`: 0.47140,
-`alpha=10`: 0.47146)이 모두 더 나쁘므로 명확한 극소점. `alpha`가 너무 작으면(0.01~1) 과소 규제로 희귀
-카테고리에 살짝 과적합하고, 너무 크면(30 이상) 과도 규제로 텍스트 피처의 계수가 눌려 급격히 나빠짐
-(`alpha=1000`에서 0.52934까지 악화). 즉 **hstack 구성을 바꾸는 시도(5-1)와 달리, alpha 튜닝은 이미 최적점
-근처에 있었어서 추가 이득은 없었지만, 그 사실 자체를 실측으로 확인**한 것에 의미가 있음.
+hstack 구성은 그대로 두고 `alpha`를 `[0.01, 1000]` 범위로 그리드서치한 결과, 5-2에서 임의로 쓰던 `alpha=3`이
+이미 최적값이었습니다(RMSLE **0.47067**, 양옆 `alpha=1`(0.47140)/`alpha=10`(0.47146) 모두 더 나쁨 → 명확한
+극소점). `alpha`가 너무 작으면 과소 규제, 너무 크면(`alpha=1000`→0.52934) 과도 규제로 텍스트 피처 계수가
+눌려 급격히 나빠집니다. 이 방향에서는 추가로 짜낼 성능은 없었지만, 현재 `alpha`가 이미 최적 근처라는 걸
+실측으로 확인했다는 데 의미가 있습니다.
 
 ---
 
 ## 6. 최종 결과 비교
 
-> ⚠️ **이 표는 15~17번 섹션(노트북) 시점 기준입니다.** 이후 9장에서 vocab 크기 검증, 새 피처,
-> FM_FTRL 모델 축 추가, leakage 없는 블렌딩까지 진행해 **최종 RMSLE 0.42015**까지 갱신했습니다.
-> 최신 결과는 [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고.
+> ⚠️ **이 표는 14~16번 섹션(노트북) 시점 기준입니다.** 이후 9장에서 vocab 크기 검증, 새 피처,
+> FM_FTRL 모델 축 추가, leakage 없는 블렌딩까지 진행해 RMSLE 0.42114까지 갱신했고, 이후 LGBM `n_estimators`를
+> 2000까지 이어학습(9-6)해 **최종 RMSLE 0.41778**까지 추가로 낮췄습니다. 이 전체가
+> 지금은 노트북 17~22번 섹션에 정식으로 통합되어 있습니다. 본격적인 성능 개선의 핵심은 사실 아래 표보다
+> **9장(특히 9-5, LGBM 튜닝 + FM_FTRL + 블렌딩)** 쪽이니 그쪽을 중심으로 보는 걸 추천합니다.
 
 | 순위 | 모델 | 구성 | RMSLE | 전략 |
 |---|---|---|---|---|
 | 🥇 | **Ridge(원본, alpha=3)** | `X_features` 그대로 | **0.47067** | 5-2 baseline = 5-3 튜닝 결과 (이미 최적) |
-| 🥈 | **LGBM(네이티브 categorical + n-gram)** | `X_features_v2`, 5-1-d 참고 | **0.47363** | 5-1 hstack 구성 변경 |
-| 3 | Ridge Blend `(보류)` | (Ridge 원본 + Ridge 가중치) 예측 평균 | 0.47084 | 5-1-b |
-| 4 | Ridge(가중치) `(보류)` | `combine_features()` 가중치 적용 | 0.47154 | 5-1-b |
-| 5 | LightGBM(단일, 원-핫+유니그램) | `X_features`, `n_estimators=200` | 0.49220 | 5-2 baseline |
-| 6 | B안 단계적 LGBM `(보류)` | 우선순위→잔차 2단계 LGBM | 0.49735 | 5-1-c |
+| 🥈 | **LGBM(네이티브 categorical + n-gram)** | `X_features_v2`, 5-1-c 참고 | **0.47363** | 5-1 hstack 구성 변경 |
+| 3 | LightGBM(단일, 원-핫+유니그램) | `X_features`, `n_estimators=200` | 0.49220 | 5-2 baseline |
+| 4 | B안 단계적 LGBM `(보류)` | 우선순위→잔차 2단계 LGBM | 0.49735 | 5-1-b |
 
-`(보류)` 표시된 3개는 노트북에서 코드가 주석 처리되어 더 이상 실행되지 않음 (12~14번 섹션). 현재 실제로
-실행되는 것은 Ridge(원본, 11번) · LightGBM 단일(11번) · LGBM 네이티브+n-gram(15~16번) · Ridge alpha
-그리드(17번) 4가지.
+`(보류)` 표시된 1개는 노트북에서 코드가 주석 처리되어 더 이상 실행되지 않음 (12번 섹션). 현재 실제로
+실행되는 것은 Ridge(원본, 11번) · LightGBM 단일(11번) · LGBM 네이티브+n-gram(14~15번) · Ridge alpha
+그리드(16번) 4가지 — 그리고 이 표에는 없지만 실질적인 성능 개선은 17번 섹션 이후(9장)에서 일어남.
 
 ### 전략별 인사이트
 
 **전략 ① (5-1) hstack 구성 방식을 바꾼 결과 — 절반은 성공, 절반은 실패**
-- 5-1-b(가중치)/5-1-c(단계 분리) 모두 원본보다 못했음. Ridge는 정규화된 최소제곱법으로 **데이터에 최적인
-  계수 배분을 스스로 찾아내는데**, 여기에 사람이 정한 우선순위(3배 가중치, 2단계 분리)를 강제로 얹으면
+- 5-1-b(단계 분리, B안)는 원본보다 못했음. Ridge는 정규화된 최소제곱법으로 **데이터에 최적인
+  계수 배분을 스스로 찾아내는데**, 여기에 사람이 정한 우선순위(2단계 분리)를 강제로 얹으면
   데이터가 실제로 원했던 최적 균형에서 벗어남.
-- 5-1-d(네이티브 categorical + n-gram)는 반대로 성공 — **모델(LGBM)의 구조적 특성에 맞춰 피처의 "표현
+- 5-1-c(네이티브 categorical + n-gram)는 반대로 성공 — **모델(LGBM)의 구조적 특성에 맞춰 피처의 "표현
   방식"만 바꾼 것**이 핵심. 우선순위를 강제하지 않고, 트리 모델이 원-핫보다 라벨 인코딩+`categorical_feature`를
   더 효율적으로 분기하는 특성과 n-gram으로 늘어난 표현력을 그대로 살려서 LightGBM RMSLE를 0.49220 →
   0.47363로 약 3.8% 개선.
-- 결론: **"우선순위를 사람이 강제하는 방식"보다 "모델 구조에 맞는 인코딩으로 바꾸는 방식"이 유효했음.**
+- 결론: **"우선순위를 사람이 강제하는 방식"보다 "모델 구조에 맞는 인코딩으로 바꾸는 방식"이 유효했음.** 다만
+  이 개선폭(3.8%)은 9장에서 LGBM을 제대로 정규화·early stopping 튜닝했을 때의 개선폭(약 9.6%, 아래 참고)에
+  비하면 작은 수준 — hstack 구성보다 하이퍼파라미터 튜닝 쪽이 훨씬 큰 지렛대였음.
 
 **전략 ② (5-2) Ridge vs LightGBM 베이스라인**
 - 같은 hstack(`X_features`)에 대해 Ridge(0.47067)가 LightGBM(0.49220)보다 확실히 우수. 이 데이터의 핵심
@@ -511,44 +443,52 @@ for a in alphas:
 
 **필요 패키지**: `pandas`, `numpy`, `scipy`, `scikit-learn`, `matplotlib`, `seaborn`, `nltk` (리소스: `punkt_tab`, `stopwords`), `lightgbm`
 
-**데이터 경로**: `../data/mercari_train.tsv` (tab-separated, 노트북 기준 상대경로)
+**데이터 경로**: `../../data/mercari_train.tsv` (tab-separated, `teamipynb/소현_mercari.ipynb` 기준 상대경로)
 
 **실행 순서**: 노트북 셀을 위에서 아래로 순서대로 실행하면 본 문서의 흐름 그대로 재현됩니다.
 - 섹션 1~2: 데이터 로드 및 기본 탐색
 - 섹션 3~8-1: 전처리 (2장)
 - 섹션 9~10-1: 벡터화/인코딩, hstack, 학습 전 데이터 시각화 (3~4장)
 - 섹션 11: `model_train_predict`/`rmsle` 정의, Ridge vs LightGBM 베이스라인 비교 (5-2)
-- 섹션 12: `(보류, 코드 주석 처리)` 가중치 `combine_features` + Ridge 블렌드 (5-1-b)
-- 섹션 13~14: `(보류, 코드 주석 처리)` B안 단계적 LGBM + 지표 비교 (5-1-c)
-- 섹션 15~16: LGBM 네이티브 categorical + n-gram + 지표 비교 (5-1-d)
-- 섹션 17: Ridge `alpha` 그리드서치 (5-3)
+- 섹션 12~13: `(보류, 코드 주석 처리)` B안 단계적 LGBM + 지표 비교 (5-1-b)
+- 섹션 14~15: LGBM 네이티브 categorical + n-gram + 지표 비교 (5-1-c)
+- 섹션 16: Ridge `alpha` 그리드서치 (5-3)
+- 섹션 17: 새 피처 엔지니어링 — 길이 피처 + target encoding (9-3)
+- 섹션 18: FM_FTRL 직접 구현 (9-4)
+- 섹션 19~21: 2-stage leakage-free 검증 — 데이터 분할 / Stage 1 튜닝(valid) / Stage 2 최종평가+블렌딩(test) (9-5)
+- 섹션 22: 최종 결과 요약 — **본격적인 성능 개선은 여기 17~21번 구간에서 일어남** (0.49220 → 0.42114)
+- 섹션 23: LGBM n_estimators 1200→2000 이어학습 (9-6) — 최종 **0.41778**
 
 **주의사항**
 - `mercari_df['price']`는 섹션 7(로그 변환) 이후 로그 스케일로 덮어써지므로, `X_features`에 절대 포함하지 않도록 주의.
-- 전체 데이터(148만 행) 처리라 `item_description` 토큰화, LightGBM 학습 셀은 실행 시간이 오래 걸릴 수 있음 (LightGBM 1회 학습 기준 수 분 단위).
+- 전체 데이터(148만 행) 처리라 `item_description` 토큰화, LightGBM 학습 셀은 실행 시간이 오래 걸릴 수 있음 (LGBM 1200라운드 튜닝 기준 수십 분 단위).
 - `random_state=156`을 모든 분할/모델에서 고정해야 6장의 비교표와 동일한 수치가 재현됨.
-- 12~14번 섹션은 코드가 주석 처리되어 있어 그대로 실행해도 아무 일도 일어나지 않음(의도된 상태). 다시 활성화하려면
-  `#` 주석을 해제하면 되고, 이때 `linear_preds`/`weighted_preds` 등 참조 변수가 앞 셀에서 먼저 정의되어 있어야 함.
+- 12~13번 섹션은 코드가 주석 처리되어 있어 그대로 실행해도 아무 일도 일어나지 않음(의도된 상태). 다시 활성화하려면
+  `#` 주석을 해제하면 되고, 이때 `linear_preds` 등 참조 변수가 앞 셀에서 먼저 정의되어 있어야 함.
 
 ---
 
 ## 8. 향후 개선 아이디어
 
 - ~~`max_features`(어휘 크기) 확대/축소에 따른 RMSLE 민감도 실험~~ → **완료, [9-1](#9-1-vocab-크기max_features-민감도-실험) 참고** (결론: 이미 충분히 큼, 캡을 더 키울 필요 없음)
-- ~~LGBM에도 `early_stopping_rounds`/`num_leaves`/`learning_rate` 등 하이퍼파라미터 튜닝 적용~~ → **완료, [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고** (0.47320 → 0.42742)
+- ~~LGBM에도 `early_stopping_rounds`/`num_leaves`/`learning_rate` 등 하이퍼파라미터 튜닝 적용~~ → **완료, [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고** (0.47363 → 0.42881, test 기준)
 - ~~수동 가중치 대신 실제 stacking(메타러너로 최적 결합 가중치를 학습)으로 재시도~~ → **완료, [9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고** (모델 예측값을 valid에서 가중치 그리드서치로 결합 — 완전한 학습형 메타러너는 아니지만 leakage 없는 결합 가중치 탐색은 달성)
 - `TruncatedSVD`로 hstack 이후 차원 축소 시도 (vocab 실험 결과 캡을 더 키우는 게 무의미한 것으로 확인됐으므로, 반대 방향인 차원 축소도 성능에 큰 영향은 없을 가능성이 높지만 미검증)
 - Ridge `alpha`를 더 촘촘한 그리드(예: 1~5 사이 0.5 간격)로 재탐색해 소수점 단위 추가 개선 여지 확인 ([9-5](#9-5-최종-leakage-free-파이프라인--블렌딩)에서 `{1,3,10}` 성긴 그리드로는 `alpha=3` 재확인만 함)
-- FM_FTRL을 노트북(`Mercari.ipynb`)에 정식 셀로 통합 (현재는 세션 스크립트로만 존재, [9-4](#9-4-fm_ftrl-직접-구현-numpyscipy) 참고)
+- ~~FM_FTRL을 노트북(`teamipynb/소현_mercari.ipynb`)에 정식 셀로 통합~~ → **완료** — 새 피처/FM_FTRL/2-stage 블렌딩 전체를
+  실제 셀(17~22번 섹션)로 반영하고 전체 재실행까지 검증함 ([9-4](#9-4-fm_ftrl-직접-구현-numpyscipy)/[9-5](#9-5-최종-leakage-free-파이프라인--블렌딩) 참고)
 - FM_FTRL의 `k`(latent factor 차원)/정규화 하이퍼파라미터도 Ridge/LGBM처럼 그리드서치
 
 ---
 
-## 9. vocab 크기 / 피처 표현 / FM_FTRL 모델 축 추가 (후속 세션)
+## 9. vocab 크기 / 피처 표현 / FM_FTRL 모델 축 추가 — **본격적인 성능 개선 구간**
 
-15~17번 섹션(노트북) 이후, 별도 세션에서 다음 순서로 심화 실험을 진행했습니다. 모든 실험은 노트북과
-동일한 `mercari_train.tsv` 전처리(섹션 1~8-1)를 재현한 캐시 위에서, **`random_state=156`으로 만든 동일한
-test set**을 기준으로 비교했습니다(전용 스크립트 실행, 노트북 셀로는 아직 미통합 — 위 TODO 참고).
+14~16번 섹션(노트북) 이후 별도 세션에서 심화 실험을 진행했고, 그 결과물(새 피처 엔지니어링, FM_FTRL,
+leakage-free 2-stage 블렌딩)을 지금은 **노트북 17~22번 섹션에 정식 코드 셀로 통합**해뒀습니다. `0.49220`
+(11번 섹션 LGBM 최초 baseline) 에서 시작해 **`0.41778`까지, RMSLE 기준 약 15.1% 개선**한 구간이 바로 여기이고,
+1~8장에서 다룬 hstack 구성 실험(5-1, 최대 3.8% 개선)보다 훨씬 큰 지렛대였습니다. 모든 실험은 노트북과
+동일한 `mercari_train.tsv` 전처리(섹션 1~8-1)와 **`random_state=156`으로 만든 동일한 test set**을 기준으로
+비교했습니다.
 
 ### 9-1. vocab 크기(`max_features`) 민감도 실험
 
@@ -564,7 +504,7 @@ test set**을 기준으로 비교했습니다(전용 스크립트 실행, 노트
 
 | config | max_features | dims | RMSLE |
 |---|---|---|---|
-| D | 20k / 30k (노트북 15번과 동일) | 50,007 | 0.47320 |
+| D | 20k / 30k (노트북 14번과 동일) | 50,007 | 0.47320 |
 | E | 40k / 60k | 100,007 | 0.47288 |
 | F | uncapped (min_df=2만) | 1,968,091 | 0.47293 |
 
@@ -574,7 +514,7 @@ test set**을 기준으로 비교했습니다(전용 스크립트 실행, 노트
 
 ### 9-2. 개선의 원천 분리 — 카테고리 인코딩 vs n-gram 확장
 
-15번 섹션의 `0.49220 → 0.47363` 개선은 (a) OHE→LGBM native categorical 인코딩, (b) unigram→ngram(1,2)
+14번 섹션의 `0.49220 → 0.47363` 개선은 (a) OHE→LGBM native categorical 인코딩, (b) unigram→ngram(1,2)
 확장이 동시에 적용된 결과입니다. 둘을 분리해서 재측정(캡은 20k/30k 고정):
 
 | config | 카테고리 인코딩 | 텍스트 | dims | RMSLE |
@@ -582,14 +522,14 @@ test set**을 기준으로 비교했습니다(전용 스크립트 실행, 노트
 | A (원본 baseline 재현) | OHE | unigram | 55,807 | 0.49180 |
 | B (카테고리만 교체) | **native** | unigram | 50,007 | **0.47409** |
 | C (텍스트만 교체) | OHE | **ngram** | 55,807 | 0.49093 |
-| D (노트북 15번 재현) | native | ngram | 50,007 | 0.47320 |
+| D (노트북 14번 재현) | native | ngram | 50,007 | 0.47320 |
 
 **B(0.47409)가 D(0.47320)에 거의 근접** → 개선의 대부분(~97%)이 **카테고리 인코딩 교체**에서 왔고,
 ngram 확장의 순수 기여(C vs A: `0.49180→0.49093`, -0.00087)는 미미합니다. 캡을 그대로 둔 채 bigram만
 추가하면 빈도 기준 top-K 캡에서 unigram이 슬롯을 거의 다 차지해 bigram이 들어갈 자리가 부족하기
 때문으로 보입니다(9-1에서 실제 bigram 어휘가 40만+임을 확인).
 
-### 9-3. 새 피처 — 길이 피처 + target encoding
+### 9-3. 새 피처 — 길이 피처 + target encoding *(노트북 17번 섹션)*
 
 브랜드/세부카테고리별 가격 통계, 텍스트 길이 등 파생 피처를 추가:
 
@@ -619,7 +559,7 @@ def target_encode(train_col, train_y, full_col, k=10):
 LGBM이 Ridge보다 약 3배 더 큰 이득을 봤습니다 — target encoding이 만드는 비선형 신호(가격대 threshold
 등)를 트리 모델이 더 잘 활용하는 것으로 해석됩니다.
 
-### 9-4. FM_FTRL 직접 구현 (numpy/scipy)
+### 9-4. FM_FTRL 직접 구현 (numpy/scipy) *(노트북 18번 섹션)*
 
 **배경**: Kaggle 공개 커널 중 `Wordbatch`(FTRL + FM_FTRL + LightGBM 블렌드)가 이 대회에서 LB
 **0.42555**를 기록한 바 있습니다 ([참고](https://www.kaggle.com/anttip/wordbatch-ftrl-fm-lgb-lbl-0-42555)).
@@ -643,7 +583,7 @@ C 컴파일러(`cl.exe`/`gcc`)도 없어 설치 자체가 불가능했습니다.
 Wordbatch의 Cython/해싱 최적화 구현과 동일하지는 않지만(속도 최적화가 덜 됨), 수학적으로는 같은
 모델(선형 + FM 상호작용, FTRL류 좌표별 적응 학습률)입니다.
 
-### 9-5. 최종 leakage-free 파이프라인 + 블렌딩
+### 9-5. 최종 leakage-free 파이프라인 + 블렌딩 *(노트북 19~22번 섹션 — 개선의 실질적 핵심 구간)*
 
 **모델별 피처 표현** (모델마다 자기에게 유리한 인코딩을 그대로 사용 — 블렌딩은 예측값 레벨에서만 결합):
 
@@ -666,17 +606,34 @@ Wordbatch의 Cython/해싱 최적화 구현과 동일하지는 않지만(속도 
 `feature_fraction=0.7` · `bagging_fraction=0.8`, `bagging_freq=1` → valid에서 1200라운드까지 계속
 개선되어 `best_iteration=1200`(상한 도달, 더 큰 `n_estimators`면 추가 개선 여지 있음).
 
-**최종 결과 (test, leakage-free)**
+**최종 결과 (test, leakage-free — 노트북 17~22번 섹션 실제 실행 결과)**
 
 | 모델/조합 | test RMSLE |
 |---|---|
-| Ridge (alpha=3) | 0.46853 |
-| FM_FTRL (18 epoch) | 0.45896 |
-| LGBM (튜닝, 1200 라운드) | 0.42742 |
-| 블렌드 (동일가중 1/3,1/3,1/3) | 0.42847 |
-| **블렌드 (valid 최적가중치 ridge=0.0 / lgbm=0.7 / fm=0.3)** | **0.42015** |
+| Ridge (alpha=3) | 0.46971 |
+| FM_FTRL (60 epoch) | 0.44584 |
+| LGBM (튜닝, 1200 라운드) | 0.42881 |
+| 블렌드 (동일가중 1/3,1/3,1/3) | 0.42974 |
+| **블렌드 (valid 최적가중치 ridge=0.0 / lgbm=0.65 / fm=0.35)** | **0.42114** |
 
 `alpha`=1/3/10 그리드에서 Ridge는 여전히 3이 최적, 최적 블렌드는 **Ridge 가중치 0** — LGBM을 제대로
-튜닝하고 FM_FTRL을 섞으면 Ridge는 더 이상 블렌드에 기여하지 않습니다(15~17번 섹션 시점엔 Ridge가
+튜닝하고 FM_FTRL을 섞으면 Ridge는 더 이상 블렌드에 기여하지 않습니다(14~16번 섹션 시점엔 Ridge가
 LGBM보다 우수했지만, LGBM을 튜닝한 뒤로는 역전됨). **`0.49220`(11번 섹션 LGBM 최초 baseline)에서
-`0.42015`까지, RMSLE 기준 약 14.7% 개선.**
+`0.42114`까지, RMSLE 기준 약 14.4% 개선.**
+
+### 9-6. n_estimators 상한 확장 (1200 → 2000) *(노트북 23번 섹션)*
+
+9-5의 LGBM이 1200라운드 상한에서 "Did not meet early stopping"으로 끝났고 직전 200라운드 구간에서도 계속
+개선 중이었던 점(상한이 진짜 수렴점이 아니었을 가능성)을 확인하기 위해, 처음부터 재학습하지 않고 이미 학습된
+1200그루 부스터를 `init_model`로 이어 학습(체크포인트 이어학습)해 총 2000그루까지 확장했습니다. 블렌드 가중치는
+9-5에서 valid로 정한 값(ridge=0.0/lgbm=0.65/fm=0.35)을 재탐색 없이 그대로 재사용:
+
+| 모델/조합 | 1200 (9-5) | 2000 (이어학습) | 개선폭 |
+|---|---|---|---|
+| LGBM 단독 | 0.42881 | **0.42388** | -0.00493 |
+| 블렌드 (동일가중) | 0.42974 | 0.42764 | -0.00210 |
+| **블렌드 (기존 가중치 재사용)** | 0.42114 | **0.41778** | **-0.00336** |
+
+참고로 test에서 블렌드 가중치를 직접 재탐색하면 `ridge=0/lgbm=0.7/fm=0.3`, RMSLE `0.41772`로 나와 기존
+가중치(0.41778)와 거의 차이가 없었습니다 — 9-5에서 valid로 정한 가중치가 라운드 수가 바뀌어도 잘 버티는
+견고한 값이었다는 뜻입니다. `n_estimators`를 더 늘리면(예: 3000+) 추가 개선 여지가 있는지는 아직 미검증.
