@@ -1,0 +1,51 @@
+# HANDOFF — Mercari 작업 인수인계
+
+마지막 갱신: 2026-08-29 · 브랜치 `KSH` · 규칙은 `CLAUDE.md` 참고.
+
+## 현재 상태
+
+- **base 파이프라인: 완료.** `teamipynb/소현_mercari_base.ipynb`에 전처리~인코딩~모델링~블렌딩까지 전부
+  구현되어 있고, 전 과정이 `docs/pipelines/PIPELINE_base.md`에 문서화됨. 최종 RMSLE **0.41778**.
+- **feature 노트북: 미착수.** `teamipynb/소현_mercari_feature.ipynb`는 현재 빈 파일(0 byte).
+  계획은 `docs/pipelines/PIPELINE_feature.md`에 우선순위별로 정리해둠 (아직 코드 없음, 계획 단계).
+
+## 확정된 결정 (Do not reconsider)
+
+아래 두 가지는 이미 확정된 결정입니다. 새로 세션을 이어받은 Claude는 이걸 다시 논의 대상으로 꺼내거나
+다른 방식을 제안하지 마세요 — 그대로 따르세요.
+
+1. **base/feature 노트북-문서는 1:1 매핑, 절대 섞지 않는다.**
+   `소현_mercari_base.ipynb` ↔ `PIPELINE_base.md`, `소현_mercari_feature.ipynb` ↔ `PIPELINE_feature.md`.
+2. **feature.ipynb는 base의 전처리/벡터화 재료를 그대로 재사용한다.**
+   `X_name`/`X_descp`/`X_cat[...]`/`X_num`을 다시 만들지 않고, base 산출물 위에 새 피처만 얹는다.
+
+이 외의 항목(우선순위 순서, 어떤 파생피처를 최종 채택할지 등)은 아직 확정이 아니며 논의/조정 가능합니다.
+
+## Next Exact Action
+
+`PIPELINE_feature.md` "우선순위 높음" 1번 — **상태 키워드 신호**부터 구현 착수:
+
+1. `item_description` 정제 토큰(base 2-7단계 결과)에서 매칭할 키워드 목록 정의
+   (`brand new`, `nwt`, `worn`, `flaw`, `defect`, `authentic`, `vintage` 등 — 확정 리스트는 아니므로
+   구현하면서 EDA로 추가/삭제 가능).
+2. 키워드별 이진 플래그 또는 총 매칭 카운트 컬럼 생성 (base의 `null_penalty` 만드는 방식과 동일 패턴).
+3. base `X_features`에 이 컬럼(들)만 추가한 버전으로 Ridge 1회 학습 → RMSLE를 base baseline(0.46971,
+   `PIPELINE_base.md` 9-5 표)과 비교해 순수 효과 측정.
+4. 결과를 `PIPELINE_feature.md`에 표로 기록 (base 9-3 형식 참고) 후, 우선순위 2번(브랜드 언급 텍스트
+   복구)으로 이동.
+
+## 다음 할 일 (전체 순서 요약)
+
+1. `소현_mercari_feature.ipynb`를 base 노트북 기반으로 시작 (전처리/벡터화 재료 재사용).
+2. `PIPELINE_feature.md`의 "우선순위 높음" 4개(상태 키워드 신호 / 브랜드 언급 텍스트 복구 / 본문 언급 가격
+   추출 / 브랜드×카테고리 조합 target encoding)부터 구현.
+3. 구현하면서 `PIPELINE_feature.md`를 base와 같은 수준(코드+결과 RMSLE 표)으로 갱신.
+4. **주의**: base 관련 내용은 `PIPELINE_base.md`에만, feature 관련 내용은 `PIPELINE_feature.md`에만 —
+   두 문서를 섞지 않는다 (`CLAUDE.md` 참고).
+
+## 참고사항
+
+- `data/mercari_train.tsv`는 git에 없음(레포 공통 `.gitignore`) — 로컬에 직접 받아야 노트북 실행 가능.
+- 이전에 있던 루트 `Mercari_validate.ipynb`는 삭제됨(커밋 `e78a229`에 스냅샷으로 남아있음, 필요시
+  `git show e78a229:04_regression_mercari/Mercari_validate.ipynb`로 복구).
+- `docs/reports_claude/report_draft_01.md`는 현재 빈 파일 — 미사용.
