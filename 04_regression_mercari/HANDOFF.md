@@ -1,8 +1,16 @@
 # HANDOFF — Mercari 작업 인수인계
 
-마지막 갱신: 2026-08-29 · 브랜치 `KSH` · 규칙은 `CLAUDE.md` 참고.
+마지막 갱신: 2026-08-31 · 브랜치 `KSH` · 규칙은 `CLAUDE.md` 참고.
 
-## 현재 상태
+## 보고서 작업 현황 (report_초안_C, 2026-08-31)
+
+- **활성 파일은 `report_초안_C.md`/`.pdf`뿐이다.** `report_초안_A.*`, `report_초안_B.*`는 동결됨 — 절대 수정 금지(`REPORT_GUIDE.md` 0절 참고). 매 수정 후 `git diff --stat -- report_초안_A.md report_초안_A.pdf report_초안_B.md report_초안_B.pdf`가 빈 출력이어야 한다.
+- 오늘 작업한 내용: 팀원 균형(소현이 항상 먼저 나오는 문제 전면 수정), 5장(Feature Engineering)에서 혜현·유경·소현 구간 보강, 2.1절 보강, 9장(팀원별 실험 상세)을 코드 없이 핵심만 남기고 팀원 간 분량을 균등화(팀원당 시각화 1개, 소현도 FM_FTRL epoch 곡선을 노트북 실제 로그로 새로 생성해 추가), 8.4 표를 RMSLE 내림차순 단일 기준으로 재정렬, `report_style.css`의 `text-align: justify`→`left` 수정(한글+영문 혼합 텍스트에서 word-spacing 왜곡 버그).
+- 재현 파이프라인: `pandoc report_초안_C.md -f markdown-implicit_figures -t html5 -s -c report_style.css -o report_초안_C.html` → Chrome headless `--print-to-pdf`(정확한 명령은 세션 히스토리 또는 `REPORT_GUIDE.md` 참고). PDF 재생성 후 PyMuPDF로 페이지별 fill% 감사 필수(`REPORT_GUIDE.md` 6절 체크리스트).
+- 오늘 확정된 새 규칙은 전부 `REPORT_GUIDE.md`에 반영함(팀원 표 순서 원칙, 9장 코드-없음/이미지 1개/분량 균등 규칙, `text-align:left` 규칙, 이미지는 재사용보다 원본 노트북 데이터 기반 신규 생성 우선).
+- **다음 세션에서 이어받을 것**: 사용자가 추가 피드백을 줄 가능성이 높음(이번 세션도 스크린샷 기반 미세 조정이 여러 차례 있었음) — `report_초안_C.pdf`를 페이지 단위로 다시 렌더링해 확인 후 시작. 아직 보고서를 최종본으로 확정(freeze)하라는 지시는 없었음.
+
+## 노트북/파이프라인 작업 현황 (base/feature)
 
 - **base 파이프라인: 완료.** `teamipynb/소현_mercari_base.ipynb`에 전처리~인코딩~모델링~블렌딩까지 전부
   구현되어 있고, 전 과정이 `docs/pipelines/PIPELINE_base.md`에 문서화됨. 최종 RMSLE **0.41778**.

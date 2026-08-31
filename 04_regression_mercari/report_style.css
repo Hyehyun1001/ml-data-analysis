@@ -1,4 +1,4 @@
-@page { size: A4; margin: 22mm 18mm; }
+@page { size: A4; margin: 16mm 18mm; }
 body {
   font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", sans-serif;
   font-size: 11pt;
@@ -7,17 +7,31 @@ body {
   max-width: 100%;
 }
 h1 { font-size: 20pt; text-align: center; margin-top: 0; }
-h2 { font-size: 15pt; page-break-before: always; border-bottom: 2px solid #333; padding-bottom: 4px; margin-top: 0; }
-h2:first-of-type { page-break-before: avoid; }
+/* 강제 page-break 없음: 장(h2)도 남는 공간이 있으면 바로 이어서 시작한다 */
+h2 { font-size: 15pt; border-bottom: 2px solid #333; padding-bottom: 4px; margin-top: 2em; }
+h1 + h2, h1 + * + h2 { margin-top: 1em; }
+h2, h3, h4 { page-break-after: avoid; break-after: avoid; }
 h3 { font-size: 12.5pt; margin-top: 1.4em; color: #222; }
 h4 { font-size: 11.5pt; }
-p { margin: 0.6em 0; text-align: justify; }
-table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 9.5pt; }
+p { margin: 0.6em 0; text-align: left; orphans: 3; widows: 3; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 9.5pt; page-break-inside: avoid; break-inside: avoid; }
 th, td { border: 1px solid #999; padding: 4px 7px; text-align: left; vertical-align: top; }
 th { background: #eee; }
-img { max-width: 92%; display: block; margin: 0.8em auto; border: 1px solid #ddd; }
+img { max-width: 74%; display: block; margin: 0.8em auto; border: 1px solid #ddd; page-break-inside: avoid; break-inside: avoid; }
+/* 그림을 담은 문단만 캡션과 분리되지 않게 묶는다(리드인 문단까지 묶으면 큰 블록이 통째로 다음 페이지로 밀려 공백이 커지므로 제외) */
+p:has(> img) { page-break-after: avoid; break-after: avoid; }
 em { color: #444; font-size: 0.95em; }
 hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 blockquote { border-left: 3px solid #999; margin: 0.6em 0; padding: 0.2em 1em; color: #444; }
 code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+pre { background: #f6f6f6; border: 1px solid #ddd; border-left: 3px solid #888; border-radius: 4px; padding: 0.8em 1em; margin: 0.8em 0; page-break-inside: avoid; break-inside: avoid; overflow-x: auto; }
+pre code { background: none; padding: 0; font-size: 9pt; line-height: 1.5; }
 a { color: #1a56db; text-decoration: none; }
+/* 목차: 장(1단계) + subsection(2단계)까지 2열로 간결하게 배치 */
+h3#목차 { font-size: 14pt; margin-top: 1.2em; }
+h3#목차 + ul { column-count: 2; column-gap: 2.2em; margin: 0.6em 0 1.4em 0; list-style: none; padding-left: 0; }
+h3#목차 + ul > li { font-size: 11.5pt; font-weight: 700; color: #1a1a1a; margin: 0.5em 0 0.15em 0; break-inside: avoid; }
+h3#목차 + ul > li:first-child { margin-top: 0; }
+h3#목차 + ul > li > ul { list-style: none; padding-left: 1.1em; margin: 0; }
+h3#목차 + ul > li > ul > li { font-size: 10pt; font-weight: 400; color: #333; margin: 0.12em 0; }
+h3#목차 + ul a { color: inherit; text-decoration: none; }
